@@ -2,7 +2,7 @@ set -e
 
 SPIDER_DIR=/vault/spider
 PREDS_IN_DIR=~/SpeakQL/SpeakQL/Allennlp_models/outputs
-PREDS_OUT_DIR=/vault/SpeakQL/Allennlp_models/outputs/uskg-test-save
+PREDS_OUT_DIR=~/SpeakQL/SpeakQL/Allennlp_models/outputs/uskg-test-save
 
 # SPIDER_DIR=/Users/mac/Desktop/syt/Deep-Learning/Dataset/spider
 # PREDS_IN_DIR=/Users/mac/Desktop/syt/Deep-Learning/Projects-M/SpeakQL/SpeakQL/Allennlp_models/outputs
