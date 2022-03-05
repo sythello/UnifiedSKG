@@ -16,6 +16,6 @@ python uskg_infer.py \
 	-test_dataset_path $SPIDER_DIR/my/dev/test_rewriter+phonemes.json \
 	-orig_dev_path $SPIDER_DIR/dev.json \
 	-db_path $SPIDER_DIR/database \
-	-eval_vers 2.12.1.0t-2.27.0.0i 2.12.1.1t-2.27.0.1i 2.12.1.2t-2.27.0.2i 2.12.1.3t-2.27.0.3i 2.12.1.4t-2.27.0.4i \
+	-eval_vers 2.12.1.0t-2.25.3.0i 2.12.1.1t-2.25.3.1i 2.12.1.2t-2.25.3.2i 2.12.1.3t-2.25.3.3i 2.12.1.4t-2.25.3.4i \
 	-eval_in_dir $PREDS_IN_DIR \
 	-eval_out_dir $PREDS_OUT_DIR

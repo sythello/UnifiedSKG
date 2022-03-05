@@ -59,7 +59,9 @@ def parse_arguments():
     parser.add_argument('-eval_in_dir', '--eval_in_dir', type=str, required=True,
                         help='The directory for prediction files (i.e. Allennlp_models/outputs)')
     parser.add_argument('-eval_out_dir', '--eval_out_dir', type=str, required=False, default=None,
-                        help='The directory for output files (dataset json with preds and eval scores, i.e. /vault/SpeakQL/.../picard-test-save)')
+                        help='The directory for output files (dataset json with preds and eval scores, i.e. /vault/SpeakQL/.../uskg-test-save)')
+    # parser.add_argument('-result_out_dir', '--result_out_dir', type=str, required=False, default=None,
+    #                     help='The directory for output files (dataset json with preds and eval scores, i.e. /vault/SpeakQL/.../uskg-test-save)')
 
     args = parser.parse_args()
     return args
@@ -292,6 +294,7 @@ def main(args):
         rewriter_ILM_pred_path = os.path.join(args.eval_in_dir, f'output-{ver}.json')
         if args.eval_out_dir is not None:
             test_output_path = os.path.join(args.eval_out_dir, f'{ver}.json')
+            result_output_path = os.path.join(args.eval_out_dir, f'eval-{ver}.json')
         
         out_msg = Full_evaluate_ILM(model=model,
                           tokenizer=tokenizer,
@@ -301,6 +304,7 @@ def main(args):
                           orig_dev_path=orig_dev_path,
                           db_path=db_path,
                           test_output_path=test_output_path,
+                          result_output_path=result_output_path,
                           ILM_rewrite_func=_Postprocess_rewrite_seq_wrapper)
         out_msgs.append(out_msg)
 
