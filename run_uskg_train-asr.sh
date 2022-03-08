@@ -21,7 +21,7 @@ python train.py \
 --do_eval \
 --do_predict \
 --predict_with_generate \
---output_dir /vault/output/A-T5_base_prefix_spider_with_cell_value-asr_mixed \
+--output_dir /vault/uskg/output/A-T5_base_prefix_spider_with_cell_value-asr_mixed \
 --overwrite_output_dir \
 --per_device_train_batch_size 4 \
 --per_device_eval_batch_size 16 \
