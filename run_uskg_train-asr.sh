@@ -1,7 +1,7 @@
 python train.py \
 --seed 2 \
---cfg Salesforce/A-T5_base_prefix_spider_with_cell_value.cfg \
---run_name A-T5_base_prefix_spider_with_cell_value \
+--cfg Salesforce/A-T5_base_prefix_spider_with_cell_value-asr_mixed.cfg \
+--run_name A-T5_base_prefix_spider_with_cell_value-asr_mixed \
 --logging_strategy steps \
 --logging_first_step true \
 --logging_steps 4 \
@@ -14,14 +14,14 @@ python train.py \
 --save_total_limit 1 \
 --load_best_model_at_end \
 --gradient_accumulation_steps 8 \
---num_train_epochs 400 \
+--num_train_epochs 60 \
 --adafactor true \
 --learning_rate 5e-5 \
 --do_train \
 --do_eval \
 --do_predict \
 --predict_with_generate \
---output_dir /vault/output/A-T5_base_prefix_spider_with_cell_value \
+--output_dir /vault/output/A-T5_base_prefix_spider_with_cell_value-asr_mixed \
 --overwrite_output_dir \
 --per_device_train_batch_size 4 \
 --per_device_eval_batch_size 16 \
@@ -31,4 +31,4 @@ python train.py \
 --ddp_find_unused_parameters true
 
 ## According to paper appendix: input_max_length=512, batch_size=32, beam_size=1
-
+## Changed num_train_epochs 400 -> 60 to keep to total steps about the same (since training set size changes: 7000 -> 48114)
