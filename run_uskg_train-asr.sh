@@ -14,14 +14,14 @@ python train.py \
 --save_total_limit 1 \
 --load_best_model_at_end \
 --gradient_accumulation_steps 8 \
---num_train_epochs 60 \
+--num_train_epochs 30 \
 --adafactor true \
 --learning_rate 5e-5 \
 --do_train \
 --do_eval \
 --do_predict \
 --predict_with_generate \
---output_dir /vault/uskg/output/A-T5_base_prefix_spider_with_cell_value-asr_mixed \
+--output_dir output/A-T5_base_prefix_spider_with_cell_value-asr_mixed \
 --overwrite_output_dir \
 --per_device_train_batch_size 4 \
 --per_device_eval_batch_size 16 \
@@ -32,3 +32,5 @@ python train.py \
 
 ## According to paper appendix: input_max_length=512, batch_size=32, beam_size=1
 ## Changed num_train_epochs 400 -> 60 to keep to total steps about the same (since training set size changes: 7000 -> 48114)
+## Changed num_train_epochs 60 -> 30 to make the total training time similar to ILM (~2 days)
+
