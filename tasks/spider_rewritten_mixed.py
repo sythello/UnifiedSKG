@@ -100,15 +100,15 @@ class SpiderRewritten(datasets.GeneratorBasedBuilder):
             datasets.SplitGenerator(
                 name=datasets.Split.TRAIN,
                 gen_kwargs={
-                    "data_filepath": downloaded_filepath + "/Spider-rewritten/train_spider-rewritten-mixed.json",
-                    "db_path": downloaded_filepath + "/Spider-rewritten/database",
+                    "data_filepath": downloaded_filepath + "/spider-rewritten-mixed/train_spider-rewritten-mixed.json",
+                    "db_path": downloaded_filepath + "/spider-rewritten-mixed/database",
                 },
             ),
             datasets.SplitGenerator(
                 name=datasets.Split.VALIDATION,
                 gen_kwargs={
-                    "data_filepath": downloaded_filepath + "/Spider-rewritten/dev-rewritten.json",
-                    "db_path": downloaded_filepath + "/Spider-rewritten/database",
+                    "data_filepath": downloaded_filepath + "/spider-rewritten-mixed/dev-rewritten.json",
+                    "db_path": downloaded_filepath + "/spider-rewritten-mixed/database",
                 },
             ),
         ]
