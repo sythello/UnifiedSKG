@@ -46,7 +46,7 @@ _URL = "https://drive.google.com/uc?export=download&id=1gjrEC46SljimFjzvKTcdJxPd
 
 
 class SpiderRewritten(datasets.GeneratorBasedBuilder):
-    VERSION = datasets.Version("2.12.1.0t-2.29.0.0i")
+    VERSION = datasets.Version("29.0.0")    ## 2.12.1.0t-2.29.0.0i; but VERSION here has to be x.y.z
 
     BUILDER_CONFIGS = [
         datasets.BuilderConfig(
