@@ -14,7 +14,7 @@ python train.py \
 --save_total_limit 1 \
 --load_best_model_at_end \
 --gradient_accumulation_steps 8 \
---num_train_epochs 30 \
+--num_train_epochs 60 \
 --adafactor true \
 --learning_rate 5e-5 \
 --do_train \
@@ -33,4 +33,5 @@ python train.py \
 ## According to paper appendix: input_max_length=512, batch_size=32, beam_size=1
 ## Changed num_train_epochs 400 -> 60 to keep to total steps about the same (since training set size changes: 7000 -> 48114)
 ## Changed num_train_epochs 60 -> 30 to make the total training time similar to ILM (~2 days)
+## ^ incorrect; changed num_train_epochs back to 60, since ILM takes about 2.5 days and tagger takes about 0.5 days; more importantly, num_train_epochs is related to lr scheduling, and changing to 30 makes it overall worse
 
