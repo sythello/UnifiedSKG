@@ -278,12 +278,15 @@ def main(args):
 
     print(f"Starting evaluations: {args.eval_vers}")
     for ver in args.eval_vers:
-        if ver.startswith('1.'):
-            _type = 'reranker-'
-        elif ver.startswith('2.') or ver.startswith('3.'):
-            _type = 'rewriter-'
-        else:
-            _type = ''
+        # if ver.startswith('1.'):
+        #     _type = 'reranker-'
+        # elif ver.startswith('2.') or ver.startswith('3.'):
+        #     _type = 'rewriter-'
+        # else:
+        #     _type = ''
+        
+        ## Now, unify all methods prediction dataset file to test-rewriter-{ver}.json
+        _type = 'rewriter-' 
         print(f'version filename: {ver} -> "test-{_type}{ver}.json"')
 
         pred_dataset_path = os.path.join(args.eval_in_dir, f'test-{_type}{ver}.json')
