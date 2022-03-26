@@ -155,7 +155,7 @@ def Full_evaluate(model,
     
     with open(pred_dataset_path, 'r') as f:
         # rewriter_preds = [json.loads(l) for l in f.readlines()]
-        test_dataset = json.load(f)[:10]     ## including predictions 
+        test_dataset = json.load(f)     ## including predictions 
     # with open(test_dataset_path, 'r') as f:
     #     test_dataset = json.load(f)
     # with open(orig_dev_path, 'r') as f:
@@ -284,7 +284,7 @@ def main(args):
         #     _type = 'rewriter-'
         # else:
         #     _type = ''
-        
+
         ## Now, unify all methods prediction dataset file to test-rewriter-{ver}.json
         _type = 'rewriter-' 
         print(f'version filename: {ver} -> "test-{_type}{ver}.json"')
