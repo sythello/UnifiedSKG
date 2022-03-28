@@ -28,6 +28,8 @@ with FileLock(".lock") as lock:
     nltk.download("punkt", quiet=True)
     nltk.download("stopwords", quiet=True)
 
+from nltk.tokenize.treebank import TreebankWordDetokenizer
+
 from copy import deepcopy
 
 from seq2seq_construction import spider
@@ -127,6 +129,9 @@ def _Postprocess_rewrite_seq_wrapper(cand_dict, pred_dict):
     _question_toks = cand_dict['question_toks']
     return Postprocess_rewrite_seq(_tags, _rewrite_seq, _question_toks)
 
+def _detokenize(toks):
+    detokenizer = TreebankWordDetokenizer()
+    return detokenizer.detokenize(toks)
 
 def Full_evaluate_ILM(model,
                       tokenizer,
@@ -193,7 +198,8 @@ def Full_evaluate_ILM(model,
 
         # _rewritten_question_toks = Postprocess_rewrite_seq(_tags, _rewrite_seq, _question_toks)
         _rewritten_question_toks = ILM_rewrite_func(c, p)
-        _rewritten_question = ' '.join(_rewritten_question_toks)
+        # _rewritten_question = ' '.join(_rewritten_question_toks)
+        _rewritten_question = _detokenize(_rewritten_question_toks)
 
         #_pred_sql = Question(_rewritten_question, _db_id, model_dict=model_dicts[rat_sql_run])[0]['inferred_code']
         
