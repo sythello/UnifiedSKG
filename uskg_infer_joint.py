@@ -62,6 +62,13 @@ def parse_arguments():
                         help='The directory for output files (dataset json with preds and eval scores, i.e. /vault/SpeakQL/.../uskg-test-save)')
     # parser.add_argument('-result_out_dir', '--result_out_dir', type=str, required=False, default=None,
     #                     help='The directory for output files (dataset json with preds and eval scores, i.e. /vault/SpeakQL/.../uskg-test-save)')
+    parser.add_argument('-eval_in_prefix', '--eval_in_prefix', type=str, default='test-rewriter-',
+                        help='the file to eval is "{eval_in_prefix}{version}.json"')
+    parser.add_argument('-dataset_out_prefix', '--dataset_out_prefix', type=str, default='',
+                        help='the output evaluated dataset is "{dataset_out_prefix}{version}.json"')
+    parser.add_argument('-result_out_prefix', '--result_out_prefix', type=str, default='eval-',
+                        help='the output evaluation results is "{result_out_prefix}{version}.json"')
+
 
     parser.add_argument('-pred_key', '--pred_key', type=str, default="question")
     parser.add_argument('-pred_toks_key', '--pred_toks_key', type=str, default="question_toks")
@@ -303,7 +310,7 @@ def main(args):
         if args.eval_out_dir is not None:
             test_output_path = os.path.join(args.eval_out_dir, output_filename)
             result_output_path = os.path.join(args.eval_out_dir, results_filename)
-            
+
         out_msg = Full_evaluate(model=model,
                               tokenizer=tokenizer,
                               eval_version=ver,
