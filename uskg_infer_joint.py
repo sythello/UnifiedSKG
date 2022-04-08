@@ -286,14 +286,24 @@ def main(args):
         #     _type = ''
 
         ## Now, unify all methods prediction dataset file to test-rewriter-{ver}.json
-        _type = 'rewriter-' 
-        print(f'version filename: {ver} -> "test-{_type}{ver}.json"')
+        # _type = 'rewriter-' 
+        # print(f'version filename: {ver} -> "test-{_type}{ver}.json"')
 
-        pred_dataset_path = os.path.join(args.eval_in_dir, f'test-{_type}{ver}.json')
+        ## Now, using args to control the fname prefix
+
+        input_filename = f'{args.eval_in_prefix}{ver}.json'
+        output_filename = f'{args.dataset_out_prefix}{ver}.json'
+        results_filename = f'{args.result_out_prefix}{ver}.json'
+
+        print(f'input filename: {ver} -> {input_filename}')
+        print(f'output filename: {ver} -> {output_filename}')
+        print(f'results filename: {ver} -> {results_filename}')
+
+        pred_dataset_path = os.path.join(args.eval_in_dir, input_filename)
         if args.eval_out_dir is not None:
-            test_output_path = os.path.join(args.eval_out_dir, f'{ver}.json')
-            result_output_path = os.path.join(args.eval_out_dir, f'eval-{ver}.json')
-        
+            test_output_path = os.path.join(args.eval_out_dir, output_filename)
+            result_output_path = os.path.join(args.eval_out_dir, results_filename)
+            
         out_msg = Full_evaluate(model=model,
                               tokenizer=tokenizer,
                               eval_version=ver,
