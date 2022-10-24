@@ -31,15 +31,16 @@ class Model(PushToHubFriendlyModel):
         if isinstance(self.pretrain_model, BartForConditionalGeneration):
             self.match_n_layer = self.config.decoder_layers
             self.match_n_head = self.config.decoder_attention_heads
+            self.n_embd = self.config.d_model
+            assert self.n_embd % self.match_n_head == 0
+            self.match_n_embd = self.n_embd // self.match_n_head # huggingface BART's dim of kv need to be calculated
         elif isinstance(self.pretrain_model, (T5ForConditionalGeneration)):
             self.match_n_layer = self.config.num_decoder_layers
             self.match_n_head = self.config.num_heads
+            self.n_embd = self.config.d_model
+            self.match_n_embd = self.config.d_kv
         else:
             raise ValueError("Other models are not supported yet!")
-
-        self.n_embd = self.config.d_model
-        assert self.n_embd % self.match_n_head == 0
-        self.match_n_embd = self.n_embd // self.match_n_head
 
         if args.special_tokens:
             self.tokenizer.add_tokens([v for k, v in args.special_tokens])
@@ -52,33 +53,33 @@ class Model(PushToHubFriendlyModel):
         self.control_trans = nn.Sequential(
             nn.Linear(self.n_embd, self.mid_dim),
             nn.Tanh(),
-            nn.Linear(self.mid_dim, self.match_n_layer * 2 * self.n_embd),
+            nn.Linear(self.mid_dim, self.match_n_layer * 2 * self.match_n_head * self.match_n_embd),
         )
         if self.args.model.knowledge_usage == 'separate':
             self.knowledge_trans = nn.Sequential(
                 nn.Linear(self.n_embd, self.mid_dim),
                 nn.Tanh(),
-                nn.Linear(self.mid_dim, self.match_n_layer * 2 * self.n_embd),
+                nn.Linear(self.mid_dim, self.match_n_layer * 2 * self.match_n_head * self.match_n_embd),
             )
 
         self.wte_enc = nn.Embedding(self.preseqlen, self.n_embd)
         self.control_trans_enc = nn.Sequential(
             nn.Linear(self.n_embd, self.mid_dim),
             nn.Tanh(),
-            nn.Linear(self.mid_dim, self.match_n_layer * 2 * self.n_embd),
+            nn.Linear(self.mid_dim, self.match_n_layer * 2 * self.match_n_head * self.match_n_embd),
         )
         if self.args.model.knowledge_usage == 'separate':
             self.knowledge_trans_enc = nn.Sequential(
                 nn.Linear(self.n_embd, self.mid_dim),
                 nn.Tanh(),
-                nn.Linear(self.mid_dim, self.match_n_layer * 2 * self.n_embd),
+                nn.Linear(self.mid_dim, self.match_n_layer * 2 * self.match_n_head * self.match_n_embd),
             )
 
         self.wte_dec = nn.Embedding(self.preseqlen, self.n_embd)
         self.control_trans_dec = nn.Sequential(
             nn.Linear(self.n_embd, self.mid_dim),
             nn.Tanh(),
-            nn.Linear(self.mid_dim, self.match_n_layer * 2 * self.n_embd),
+            nn.Linear(self.mid_dim, self.match_n_layer * 2 * self.match_n_head * self.match_n_embd),
         )
 
         # Knowledge prompt.
@@ -86,7 +87,7 @@ class Model(PushToHubFriendlyModel):
             self.knowledge_trans_dec = nn.Sequential(
                 nn.Linear(self.n_embd, self.mid_dim),
                 nn.Tanh(),
-                nn.Linear(self.mid_dim, self.match_n_layer * 2 * self.n_embd),
+                nn.Linear(self.mid_dim, self.match_n_layer * 2 * self.match_n_head * self.match_n_embd),
             )
 
         self.dropout = nn.Dropout(args.prefix_tuning.prefix_dropout)
@@ -117,7 +118,7 @@ class Model(PushToHubFriendlyModel):
             temp_control = temp_control + description.repeat_interleave(sample_size, dim=0).unsqueeze(1)
         past_key_values = self.control_trans(temp_control)  # bsz, seqlen, layer*emb
         if knowledge is not None:
-            past_key_values = torch.cat([past_key_values, self.knowledge_trans(knowledge)], dim=1)
+            past_key_values = torch.cat([past_key_values, self.knowledge_trans(knowledge.repeat_interleave(sample_size, dim=0))], dim=1)
 
         bsz, seqlen, _ = past_key_values.shape
         past_key_values = past_key_values.view(
@@ -134,7 +135,7 @@ class Model(PushToHubFriendlyModel):
             temp_control_dec
         )  # bsz, seqlen, layer*emb
         if knowledge is not None:
-            past_key_values_dec = torch.cat([past_key_values_dec, self.knowledge_trans_dec(knowledge)], dim=1)
+            past_key_values_dec = torch.cat([past_key_values_dec, self.knowledge_trans_dec(knowledge.repeat_interleave(sample_size, dim=0))], dim=1)
 
         bsz, seqlen, _ = past_key_values_dec.shape
         past_key_values_dec = past_key_values_dec.view(
