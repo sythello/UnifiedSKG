@@ -1,0 +1,577 @@
+import sys
+import os
+import time
+import torch
+import datasets
+from transformers import (
+    HfArgumentParser,
+    set_seed,
+    AutoTokenizer
+)
+from utils.configue import Configure
+from utils.training_arguments import WrappedSeq2SeqTrainingArguments
+from models.unified.prefixtuning import Model
+
+import nltk
+
+import json
+from copy import deepcopy
+from collections import Counter, defaultdict
+import importlib
+import pickle
+
+from seq2seq_construction import spider
+from third_party.spider.preprocess.get_tables import dump_db_json_schema
+
+import numpy as np
+from tqdm import tqdm
+import editdistance
+from nltk.translate.bleu_score import corpus_bleu
+from nltk.tokenize.treebank import TreebankWordDetokenizer
+
+import re
+from copy import deepcopy
+from typing import List, Dict
+
+from datasets.dataset_dict import DatasetDict
+from torch.utils.data import Dataset
+from torch.utils.data.dataset import T_co
+
+from third_party.miscs.bridge_content_encoder import get_database_matches
+
+from language.xsp.data_preprocessing import spider_preprocessing, wikisql_preprocessing, michigan_preprocessing
+
+
+
+def general_fmt_dict_to_uskg_schema(general_fmt_dict):
+    """
+    Args:
+        general_fmt_dict (Dict): {
+            "db_id": str
+            "table_names_original": List[str], original table name (concert_singer)
+            "table_names_clean": List[str], clean table names (concert_singer)
+            "column_names_original": List[str], original column name (singer_id)
+            "column_names_clean": List[str], clean columns names (singer id)
+            "column_db_full_names": List[str], name of table::column in DB (may differ from column_names) (singer::singer_id)
+            "column_table_ids": List[int], for each column, the corresponding table index
+            "column_types": List[str], column types
+            "primary_keys": List[int], the columns indices that are primary key
+            "foreign_keys": List[[int, int]], the f-p column index pairs (fk_id, pk_id)
+            "sqlite_path": str
+            "sqlite_conn": sqlite3.Connection
+        }
+    
+    Output:
+        uskg_schema = (for reference) {
+            "db_table_names": schema["table_names_original"],
+            "db_column_names": {
+                "table_id": [table_id for table_id, column_name in schema["column_names_original"]],
+                "column_name": [column_name for table_id, column_name in schema["column_names_original"]]
+            },
+            "db_column_types": schema["column_types"],
+            "db_primary_keys": [{"column_id": column_id} for column_id in schema["primary_keys"]],
+            "db_foreign_keys": [
+                {"column_id": column_id, "other_column_id": other_column_id}
+                for column_id, other_column_id in schema["foreign_keys"]
+            ],
+        }
+    """
+
+    db_id = general_fmt_dict["db_id"]
+    db_table_orig_names = general_fmt_dict["table_names_original"]
+    db_table_clean_names = general_fmt_dict["table_names_clean"]
+    db_column_orig_names = general_fmt_dict["column_names_original"]
+    db_column_clean_names = general_fmt_dict["column_names_clean"]
+    col_db_full_names = general_fmt_dict["column_db_full_names"]
+    db_column_table_ids = general_fmt_dict["column_table_ids"]
+    db_column_types = general_fmt_dict["column_types"]
+    db_primary_keys = general_fmt_dict["primary_keys"]
+    db_foreign_keys = general_fmt_dict["foreign_keys"]
+    sqlite_path = general_fmt_dict["sqlite_path"]
+    sqlite_conn = general_fmt_dict["sqlite_conn"]
+    
+    # USKG specific
+    uskg_primary_keys = [{"column_id": col_idx} for col_idx in db_primary_keys]
+    uskg_foreign_keys = [{"column_id": fk_idx, "other_column_id": pk_idx} for fk_idx, pk_idx in db_foreign_keys]
+
+    uskg_schema = {
+        "db_id": db_id,
+        "db_path": sqlite_path,
+        "db_table_names": db_table_orig_names,
+        "db_column_names": {
+            "table_id": db_column_table_ids,
+            "column_name": db_column_orig_names,
+        },
+        "db_column_types": db_column_types,
+        "db_primary_keys": [{"column_id": column_id} for column_id in db_primary_keys],
+        "db_foreign_keys": [
+            {"column_id": column_id, "other_column_id": other_column_id}
+            for column_id, other_column_id in db_foreign_keys
+        ],
+    }
+    
+    return uskg_schema
+
+
+
+## Adapted from seq2seq_construction.spider
+def serialize_schema(
+        question: str,
+        db_path: str,
+        db_id: str,
+        db_column_names: Dict[str, str],
+        db_table_names: List[str],
+        schema_serialization_type: str = "peteshaw",
+        schema_serialization_randomized: bool = False,
+        schema_serialization_with_db_id: bool = True,
+        schema_serialization_with_db_content: bool = False,
+        normalize_query: bool = True,
+) -> str:
+    if schema_serialization_type == "verbose":
+        db_id_str = "Database: {db_id}. "
+        table_sep = ". "
+        table_str = "Table: {table}. Columns: {columns}"
+        column_sep = ", "
+        column_str_with_values = "{column} ({values})"
+        column_str_without_values = "{column}"
+        value_sep = ", "
+    elif schema_serialization_type == "peteshaw":
+        # see https://github.com/google-research/language/blob/master/language/nqg/tasks/spider/append_schema.py#L42
+        db_id_str = " | {db_id}"
+        table_sep = ""
+        table_str = " | {table} : {columns}"
+        column_sep = " , "
+        column_str_with_values = "{column} ( {values} )"
+        column_str_without_values = "{column}"
+        value_sep = " , "
+    else:
+        raise NotImplementedError
+
+    def get_column_str(table_name: str, column_name: str) -> str:
+        column_name_str = column_name.lower() if normalize_query else column_name
+        if schema_serialization_with_db_content:
+            matches = get_database_matches(
+                question=question,
+                table_name=table_name,
+                column_name=column_name,
+                # db_path=(db_path + "/" + db_id + "/" + db_id + ".sqlite"),
+                db_path=db_path,
+            )
+            if matches:
+                return column_str_with_values.format(
+                    column=column_name_str, values=value_sep.join(matches)
+                )
+            else:
+                return column_str_without_values.format(column=column_name_str)
+        else:
+            return column_str_without_values.format(column=column_name_str)
+
+    tables = [
+        table_str.format(
+            table=table_name.lower() if normalize_query else table_name,
+            columns=column_sep.join(
+                map(
+                    lambda y: get_column_str(table_name=table_name, column_name=y[1]),
+                    filter(
+                        lambda y: y[0] == table_id,
+                        zip(
+                            db_column_names["table_id"],
+                            db_column_names["column_name"],
+                        ),
+                    ),
+                )
+            ),
+        )
+        for table_id, table_name in enumerate(db_table_names)
+    ]
+    if schema_serialization_randomized:
+        random.shuffle(tables)
+    if schema_serialization_with_db_id:
+        serialized_schema = db_id_str.format(db_id=db_id) + table_sep.join(tables)
+    else:
+        serialized_schema = table_sep.join(tables)
+    return serialized_schema
+
+
+
+def precompute_spider_uskg_schemas_dict(orig_tables_path):
+    uskg_schemas_dict = dict()
+
+    spider_dbs_dict = spider_preprocessing.load_spider_tables(orig_tables_path)
+
+    for db_id, db_dict in spider_dbs_dict.items():
+        general_fmt_dict = db_dict_to_general_fmt(db_dict, db_id,
+                                                  sqlite_path=os.path.join(xsp_data_dir, f"spider/database/{db_id}/{db_id}.sqlite"),
+                                                  rigorous_foreign_key=True)
+        
+        uskg_schema = general_fmt_dict_to_uskg_schema(general_fmt_dict)
+        
+        uskg_schemas_dict[db_id] = uskg_schema
+
+    return uskg_schemas_dict
+
+
+def uskg_sample_to_struct_input(uskg_sample, uskg_schemas_dict):
+    db_id = uskg_sample["db_id"]
+    uskg_schema = uskg_schemas_dict[db_id]
+    
+    return serialize_schema(
+        question=uskg_sample["question"],
+        db_path=uskg_sample["db_path"],
+        db_id=db_id,
+        db_column_names=uskg_schema["db_column_names"],
+        db_table_names=uskg_schema["db_table_names"],
+        schema_serialization_type="peteshaw",
+        schema_serialization_randomized=False,
+        schema_serialization_with_db_id=True,
+        schema_serialization_with_db_content=True,
+        normalize_query=True,
+    )
+
+
+
+class StructCharRangesCollector:
+    def __init__(self):
+        self.initialize()
+
+    def initialize(self):
+        self.db_id2char_ranges = dict()
+        self.table2char_ranges = dict()
+        self.column2char_ranges = dict()
+        
+        # Due to rat-sql stemming tokens, rat-sql nodes and uskg text may mismatch,
+        # so we save a list and use the order instead of name for indexing 
+        self.db_id_char_ranges_list = []
+        self.column_char_ranges_list = []
+        self.table_char_ranges_list = []
+
+        self.bar_cnt = 0
+        self.curr_table = None
+        self.curr_node_type = None   # [None, 'db_id', 'table', 'column']
+        self.curr_node_toks = []
+        self.curr_node_char_start = None
+        self.curr_node_char_end = None
+        self.open_bracket = False
+        
+    def _register_curr_node(self):
+        curr_node_name = ' '.join(self.curr_node_toks)
+        curr_range = (self.curr_node_char_start, self.curr_node_char_end)
+        
+        if self.curr_node_type == 'db_id':
+            self.db_id2char_ranges[curr_node_name] = curr_range
+            self.db_id_char_ranges_list.append(curr_range)   
+        elif self.curr_node_type == 'table':
+            self.table2char_ranges[curr_node_name] = curr_range
+            self.table_char_ranges_list.append(curr_range)
+            self.curr_table = curr_node_name
+        elif self.curr_node_type == 'column':
+            self.column2char_ranges[(self.curr_table, curr_node_name)] = curr_range
+            self.column_char_ranges_list.append(curr_range)
+        else:
+            raise ValueError(curr_node_type)
+
+        self.curr_node_toks = []
+        self.curr_node_char_start = None
+        self.curr_node_char_end = None
+    
+    def collect(self, struct_in, tokenized_txt, _n_words_before_struct):
+        # struct_words = struct_in.strip().split(' ')
+        struct_words = struct_in.strip().split()
+        
+        for sw_id, sw in enumerate(struct_words):
+            char_range = tokenized_txt.word_to_chars(sw_id + _n_words_before_struct)
+
+            # print(sw_id, char_range, sw, self.curr_node_type, self.open_bracket)
+
+            if sw == '(':
+                self.open_bracket = True
+                continue
+
+            if sw == ')':
+                self.open_bracket = False
+                self.curr_node_char_end = char_range[1]
+                continue
+
+            if self.open_bracket:
+                # in the list of cells, do not add tokens here to name 
+                continue
+
+            if sw == '|':
+                if self.curr_node_type is not None:
+                    self._register_curr_node()
+                self.bar_cnt += 1
+                if self.bar_cnt == 1:
+                    self.curr_node_type = 'db_id'
+                if self.bar_cnt > 1:
+                    self.curr_node_type = 'table'
+                continue
+
+            if sw == ':':
+                assert self.curr_node_type == 'table'
+                self._register_curr_node()
+                self.curr_node_type = 'column'
+                continue
+
+            if sw == ',':
+                assert self.curr_node_type == 'column'
+                self._register_curr_node()
+                self.curr_node_type = 'column'
+                continue
+
+            self.curr_node_toks.append(sw)
+            if self.curr_node_char_start is None:
+                self.curr_node_char_start = char_range[0]
+            self.curr_node_char_end = char_range[1]
+
+        self._register_curr_node()
+
+
+
+## Combine experiment codes 
+def collect_node_char_ranges(sample, tokenizer=None, tokenizer_args=None, txt=None, tokenized_txt=None, debug=False):
+    text_in = sample['question']
+    struct_in = uskg_sample_to_struct_input(sample)
+    _splitter = "; structed knowledge: "
+    
+    if tokenizer_args is None:
+        tokenizer_args = dict()
+        
+    if txt is None:
+        txt = "{}{}{}".format(text_in, _splitter, struct_in)
+    
+    if tokenized_txt is None:
+        # tokenized_txt = tokenizer([txt], max_length=1024, padding="max_length", truncation=True)
+        tokenized_txt = tokenizer([txt], **tokenizer_args)
+        ## possible problem: exceeding max length!
+    
+    ratsql_graph_nodes = sample['rat_sql_graph']['nodes']
+#     question_toks = sample['question_toks']
+    question_toks = sample['rat_sql_graph']['q_nodes_orig']
+
+    _q_nodes = []  # [stem token (node name)]
+    q_nodes = []  # [(stem token (node name), orig question token)]
+    c_nodes = []  # [(orig table name, orig column name)]
+    t_nodes = []  # [orig table name]
+
+    for n in ratsql_graph_nodes:
+        if n.startswith('<C>'):
+            _n = n[3:]
+            _t, _c = _n.split('::')
+            c_nodes.append((_t, _c))
+        elif n.startswith('<T>'):
+            _n = n[3:]
+            t_nodes.append(_n)
+        else:
+            _q_nodes.append(n)
+
+    assert len(_q_nodes) == len(question_toks), (_q_nodes, question_toks)
+    q_nodes = list(zip(_q_nodes, question_toks))
+    
+    # Collection char ranges 
+    q_node_chars = []   # [(st, ed)]; same below
+    c_node_chars = []
+    t_node_chars = []
+    
+    # Text part
+    # Assumption: the mismatch between whitespace words (text_words) and question words only come from trailing puncts
+    # Currently the code can handle combining question toks into whitespace words
+#     text_words = text_in.strip().split(' ') + ['<SENTINAL>']
+    text_words = text_in.lower().strip().split() + ['<SENTINAL>']
+    text_word_char_ranges = [tokenized_txt.word_to_chars(i) for i in range(len(text_words) - 1)] + [(None, None)]  # -1 to remove the sentinal 
+
+    curr_tw_idx = 0
+    curr_tw = text_words[0]
+    curr_tw_char_range = text_word_char_ranges[0]
+    curr_char_ptr = 0
+    for stem_tok, orig_tok in q_nodes:
+        if curr_tw == orig_tok:
+            # finishing current word 
+            q_node_chars.append((curr_char_ptr, curr_char_ptr + len(orig_tok)))   # curr pos to curr pos + len 
+            curr_tw_idx += 1
+            curr_tw = text_words[curr_tw_idx]
+            curr_tw_char_range = text_word_char_ranges[curr_tw_idx]
+            curr_char_ptr = curr_tw_char_range[0]
+        else:
+            # not finishing current word 
+            assert curr_tw.startswith(orig_tok), (curr_tw, orig_tok)
+            q_node_chars.append((curr_char_ptr, curr_char_ptr + len(orig_tok)))   # curr pos to curr pos + len 
+            curr_char_ptr += len(orig_tok)     # move ptr forward by len 
+            curr_tw = curr_tw[len(orig_tok):]  # get the remaining chars in the word 
+
+    assert [txt[st:ed].lower() for st, ed in q_node_chars] == question_toks, ([txt[st:ed] for st, ed in q_node_chars], question_toks)
+    
+    # Struct part 
+    _str_before_struct = text_in + _splitter
+    _n_words_before_struct = len(_str_before_struct.strip().split())
+
+    struct_ranges_collector = StructCharRangesCollector()
+    struct_ranges_collector.collect(struct_in, tokenized_txt, _n_words_before_struct)
+    
+    # Due to rat-sql stemming tokens, rat-sql nodes and uskg text may mismatch
+#     for c_node in c_nodes:
+#         if c_node == ('NONE', '*'):
+#             # the special column in spider, using db_id 
+#             c_node_chars.append(list(struct_ranges_collector.db_id2char_ranges.values())[0])   # assuming only 1 db_id, which should be true...
+#         else:
+#             c_node_chars.append(struct_ranges_collector.column2char_ranges[c_node])
+
+#     for t_node in t_nodes:
+#         t_node_chars.append(struct_ranges_collector.table2char_ranges[t_node])
+
+    c_node_chars.extend(struct_ranges_collector.db_id_char_ranges_list + struct_ranges_collector.column_char_ranges_list)
+    t_node_chars.extend(struct_ranges_collector.table_char_ranges_list)
+
+    ## Check all 
+    if debug:
+        for q_node, (st, ed) in zip(q_nodes, q_node_chars):
+            print(q_node, txt[st:ed])
+        print()
+        for t_node, (st, ed) in zip(t_nodes, t_node_chars):
+            print(t_node, txt[st:ed])
+        print()
+        for c_node, (st, ed) in zip(c_nodes, c_node_chars):
+            print(c_node, txt[st:ed])
+        
+    return {
+        "q_node_chars": q_node_chars,
+        "c_node_chars": c_node_chars,
+        "t_node_chars": t_node_chars,
+    }
+    
+
+
+def get_USKG_node_encodings(sample, model, tokenizer, tokenizer_args=None, pooling_func=None, debug=False):
+    """
+    Args:
+        pooling_func (Callable): np.array(n_pieces, dim) ==> np.array(dim,); default is np.mean
+    """
+    text_in = sample['question']
+    struct_in = uskg_sample_to_struct_input(sample)
+    
+    _splitter = "; structed knowledge: "
+    txt = "{}{}{}".format(text_in, _splitter, struct_in)
+
+    if tokenizer_args is None:
+        tokenizer_args = {
+            "max_length": 1024,
+            "padding": "max_length",
+            "truncation": True
+        }
+    if pooling_func is None:
+        pooling_func = lambda l: np.mean(l, axis=0)
+        
+    tokenized_txt = tokenizer([txt], **tokenizer_args)
+    
+    # Get encoding tensor 
+    with torch.no_grad():
+        past_prompt = model.get_prompt(
+            bsz=1,              # bsz = input_ids.shape[0]
+            sample_size=1,      # sample_size=kwargs['num_beams']
+            description=None,   
+            knowledge=None,     
+        )
+        encoder_outputs = model.pretrain_model.encoder(
+            input_ids=torch.LongTensor(tokenized_txt.data['input_ids']),
+            attention_mask=torch.LongTensor(tokenized_txt.data['attention_mask']),
+            past_prompt=past_prompt,
+        )
+    encoder_output_hidden_states = encoder_outputs.last_hidden_state.detach().squeeze(0).cpu().numpy()
+    if debug:
+        print('encoder_output_hidden_states:', encoder_output_hidden_states.shape)
+    
+    # Get node-pieces mapping via char ranges 
+    char_ranges_dict = collect_node_char_ranges(sample, txt=txt, tokenized_txt=tokenized_txt)
+    node_char_ranges = char_ranges_dict['q_node_chars'] + char_ranges_dict['c_node_chars'] + char_ranges_dict['t_node_chars']
+
+    # some chars can be mapped to multiple tokens (e.g. 'i' => '▁', 'i' )
+    char_to_tokens_dict = defaultdict(list)
+    for token_idx, tok in enumerate(tokenized_txt.tokens()):
+        if tok == '</s>':
+            break
+        char_span = tokenized_txt.token_to_chars(token_idx)
+        for char_idx in range(char_span[0], char_span[1]):
+            char_to_tokens_dict[char_idx].append(token_idx)
+    
+    node_pieces_ranges = []
+    for st, ed in node_char_ranges:
+        piece_ids = []
+        for char_idx in range(st, ed):
+            _piece_ids = char_to_tokens_dict[char_idx]
+            piece_ids.extend(_piece_ids)
+
+        piece_st = piece_ids[0]
+        piece_ed = piece_ids[-1] + 1
+        # the collected piece_ids should be continuous 
+        # ^ not true... some chars can be mapped to multiple tokens (started by ▁ )
+        # re-collect a char-to-token
+        assert set(range(piece_st, piece_ed)) == set(piece_ids), piece_ids
+
+        node_pieces_ranges.append((piece_st, piece_ed))
+    
+    if debug:
+        print('node_pieces_ranges:', node_pieces_ranges)
+    
+    # Pool the encodings per node 
+    node_encodings = []
+    for piece_st, piece_ed in node_pieces_ranges:
+        enc_vecs = encoder_output_hidden_states[piece_st : piece_ed]
+        enc_pooled = pooling_func(enc_vecs)
+        node_encodings.append(enc_pooled)
+    
+    return node_encodings
+
+
+
+def extract_probing_samples_link_prediction_uskg(dataset_sample,
+                                                 db_schemas_dict,
+                                                 model,
+                                                 tokenizer,
+                                                 pos=None,
+                                                 max_rel_occ=None,
+                                                 debug=False):
+    """
+    Args:
+        dataset_sample (Dict): a sample dict from spider dataset
+        db_schemas_dict (Dict): db_id => db_schema, precomputed for all DBs (not used here)
+        model (EncDec): the rat-sql model
+        pos (List[Tuple]): the position pairs to use. If none, will randomly generate
+        max_rel_occ (int): each relation occur at most this many times in each (original) sample
+    
+    Return:
+        X (List[np.array]): input features, "shape" = (n, dim)
+        y (List): output labels, "shape" = (n,)
+        pos (List[Tuple]): actual position (node-id) pairs for X and y
+    """
+    
+    d = dataset_sample
+    
+    db_id = d['db_id']
+    # db_schema = db_schemas_dict[db_id]
+    question = d['question']
+
+    # get relation matrix (relation_id2name not available as it needs rat-sql model)
+    graph_dict = dataset_sample['rat_sql_graph']
+    # graph_dict['relation_id2name'] = {v : k for k, v in model.encoder.encs_update.relation_ids.items()}
+    
+    # get encodings
+    # rat_sql_encoder_state = get_rat_sql_encoder_state(question=question, db_schema=db_schema, model=model)
+    # enc_repr = rat_sql_encoder_state.memory.squeeze(0).detach().cpu().numpy()
+    enc_repr = Get_USKG_node_encodings(sample=dataset_sample,
+                                       model=model,
+                                       tokenizer=tokenizer,
+                                       debug=debug)
+    
+    X, y, pos = collect_link_prediction_samples(
+        graph_dict,
+        enc_repr,
+        pos=pos,
+        max_rel_occ=max_rel_occ,
+        debug=debug)
+    
+    return X, y, pos
+
+
+
+
+
+
