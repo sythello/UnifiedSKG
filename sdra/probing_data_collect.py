@@ -70,31 +70,52 @@ def _random_select_indices(orig_len, k, ds, seed=42):
     return sel_ids
 
 
+def load_model_and_tokenizer(args):
+    save_argv = sys.argv
 
-def main(args):
-    # probing_data_dir = "/Users/mac/Desktop/syt/Deep-Learning/Projects-M/SDR-analysis/data/probing/text2sql/link_prediction/spider/ratsql"
-    probing_data_dir = args.probing_data_dir
+    # Set args here for runnning on notebook, we make them out here to make it more illustrative.
+    sys.argv = ['/usr/local/lib/python3.7/dist-packages/ipykernel_launcher.py', # This is the name of your .py launcher when you run this line of code.
+                # belows are the parameters we set, take spider for example
+                '--cfg', 'Salesforce/T5_large_prefix_spider_with_cell_value.cfg', 
+                '--output_dir', './tmp']
+    parser = HfArgumentParser((WrappedSeq2SeqTrainingArguments,))
+    training_args, = parser.parse_args_into_dataclasses()
+    set_seed(training_args.seed)
+    args = Configure.Get(training_args.cfg)
 
-    orig_ds = 'dev'
-    prob_ds = 'test'
-    # dataset_path = f"/Users/mac/Desktop/syt/Deep-Learning/Projects-M/SDR-analysis/data/spider/{orig_ds}+ratsql_graph.json"
-    dataset_path = os.path.join(args.input_spider_dir, f'{orig_ds}+ratsql_graph.json')
+    sys.argv = save_argv
 
-    # pos_file_path = os.path.join(probing_data_dir, f'{orig_ds}.{prob_ds}.pos.txt')
-    pos_file_path = args.in_pos_path
+    # TODO: add model_path to args 
+    model_path = 'hkunlp/from_all_T5_large_prefix_spider_with_cell_value2'
+    # model_path = 'hkunlp/from_all_T5_large_prefix_spider_with_cell_value2'
+    # model_path = '/Users/mac/Desktop/syt/Deep-Learning/Repos/UnifiedSKG/output/server_runs/A-T5_base_prefix_spider_with_cell_value-asr_mixed/checkpoint-79500/'
+    # model_path = '/Users/mac/Desktop/syt/Deep-Learning/Repos/UnifiedSKG/output/server_runs/A-T5_base_prefix_spider_with_cell_value-rewritten_mixed/checkpoint-56500/'
 
-    # xsp_data_dir = "/Users/mac/Desktop/syt/Deep-Learning/Repos/Google-Research-Language/language/language/xsp/data"
-    # spider_tables_path = os.path.join(xsp_data_dir, 'spider', 'tables.json')
-    spider_tables_path = args.in_tables_path
+    # tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)
 
-    uskg_schemas_dict = pb_utils.precompute_spider_uskg_schemas_dict(spider_tables_path)
+    # for word/token/char mapping functions
+    tokenizer_fast = AutoTokenizer.from_pretrained('t5-large', use_fast=True)
+
+    model = Model(args)
+    model.load(model_path)
+
+    return model, tokenizer_fast
 
 
-    with open(dataset_path, 'r') as f:
-        orig_dataset = json.load(f)
-        
-    for d in orig_dataset:
-        d['rat_sql_graph']['relations'] = json.loads(d['rat_sql_graph']['relations'])
+
+def collect_probing_dataset(args,
+        model,
+        tokenizer_fast,
+        uskg_schemas_dict,
+        orig_dataset,
+        orig_ds,
+        prob_ds,
+        **extra_kwargs):
+
+    if args.probing_data_in_dir is not None:
+        pos_file_path = os.path.join(args.probing_data_in_dir, f'{orig_ds}.{prob_ds}.pos.txt')
+    else:
+        pos_file_path = None
 
     if pos_file_path is not None:
         with open(pos_file_path, 'r') as f:
@@ -112,37 +133,43 @@ def main(args):
         # len(sample_ds_indices), len(pos_per_sample)
     else:
         pos_per_sample = defaultdict(lambda: None)
-
-        # TODO: test this implementation!
-
-
-        sample_ds_indices
+        sample_ds_indices = _random_select_indices(orig_len=len(orig_dataset), k=args.ds_size, ds=prob_ds, seed=42)
 
 
     all_X = []
     all_y = []
     all_pos = []
 
-    for sample_ds_idx in tqdm(sample_ds_indices):
+    for sample_ds_idx in tqdm(sample_ds_indices, ascii=True):
         dataset_sample = orig_dataset[sample_ds_idx]
         pos_list = pos_per_sample[sample_ds_idx]
 
-        X, y, pos = extract_probing_samples_link_prediction_uskg(dataset_sample=dataset_sample,
-                                                                 db_schemas_dict=None,
-                                                                 model=model,
-                                                                 tokenizer=tokenizer_fast,
-                                                                 pos=pos_list,
-                                                                 max_rel_occ=None,  # when given pos, this is not needed 
-                                                                 debug=False)
-        
-        all_X.extend(X)
-        all_y.extend(y)
-        pos = [(sample_ds_idx, i, j) for i, j in pos]   # add sample idx 
-        all_pos.extend(pos)
-        time.sleep(0.2)
+        try:
+            X, y, pos = pb_utils.extract_probing_samples_link_prediction_uskg(
+                dataset_sample=dataset_sample,
+                db_schemas_dict=uskg_schemas_dict,
+                model=model,
+                tokenizer=tokenizer_fast,
+                pos=pos_list,
+                max_rel_occ=args.max_occ,  # when given pos, this is not needed 
+                debug=False)
+            
+            all_X.extend(X)
+            all_y.extend(y)
+            pos = [(sample_ds_idx, i, j) for i, j in pos]   # add sample idx 
+            all_pos.extend(pos)
+        except TypeError as e:
+            # input too long will cause this error
+            print(f'WARNING: sample {sample_ds_idx} txt too long, skipped')
+            continue
+        except Exception as e:
+            raise e
+
+        # time.sleep(0.2)
     # len(all_X), len(all_y), len(all_pos)
 
-    probing_data_out_dir = "/Users/mac/Desktop/syt/Deep-Learning/Projects-M/SDR-analysis/data/probing/text2sql/link_prediction/spider/uskg"
+    # probing_data_out_dir = "/Users/mac/Desktop/syt/Deep-Learning/Projects-M/SDR-analysis/data/probing/text2sql/link_prediction/spider/uskg"
+    probing_data_out_dir = args.probing_data_out_dir
     os.makedirs(probing_data_out_dir, exist_ok=True)
 
     output_path_test_X = os.path.join(probing_data_out_dir, f'{orig_ds}.{prob_ds}.X.pkl')
@@ -159,22 +186,62 @@ def main(args):
 
 
 
+def main(args):
+    model, tokenizer_fast = load_model_and_tokenizer(args)
+
+    # probing_data_dir = "/Users/mac/Desktop/syt/Deep-Learning/Projects-M/SDR-analysis/data/probing/text2sql/link_prediction/spider/ratsql"
+    # probing_data_dir = args.probing_data_dir
+
+    # xsp_data_dir = "/Users/mac/Desktop/syt/Deep-Learning/Repos/Google-Research-Language/language/language/xsp/data"
+    # spider_tables_path = os.path.join(xsp_data_dir, 'spider', 'tables.json')
+
+    uskg_schemas_dict = pb_utils.precompute_spider_uskg_schemas_dict(
+        orig_tables_path=args.in_tables_path,
+        db_dir=args.input_database_dir)
+
+    kwargs = {
+        'model': model,
+        'tokenizer_fast': tokenizer_fast,
+        'uskg_schemas_dict': uskg_schemas_dict,
+    }
+
+    orig_ds_list = ['train', 'dev']
+    prob_ds_list = ['train', 'test']
+    for orig_ds in orig_ds_list:
+        # dataset_path = f"/Users/mac/Desktop/syt/Deep-Learning/Projects-M/SDR-analysis/data/spider/{orig_ds}+ratsql_graph.json"
+        dataset_path = os.path.join(args.input_spider_dir, f'{orig_ds}+ratsql_graph.json')
+        with open(dataset_path, 'r') as f:
+            orig_dataset = json.load(f)
+        for d in orig_dataset:
+            d['rat_sql_graph']['relations'] = json.loads(d['rat_sql_graph']['relations'])
+
+        kwargs['orig_ds'] = orig_ds
+        kwargs['orig_dataset'] = orig_dataset
+
+        for prob_ds in prob_ds_list:
+            kwargs['prob_ds'] = prob_ds
+
+            collect_probing_dataset(args, **kwargs)
 
 
 
 if __name__ == '__main__':
     parser = ArgumentParser()
 
-    parser.add_argument('-in_spider', '--input_spider_dir', type=str, required=True,
-        desc="Dir with input spider dataset files (xxx+rat_sql_graph.json)")
+    parser.add_argument('-in_spider_dir', '--input_spider_dir', type=str, required=True,
+        help="Dir with input spider dataset files (xxx+rat_sql_graph.json)")
     parser.add_argument('-in_tables', '--in_tables_path', type=str, required=True,
-        desc="Input spider tables file (tables.json)")
-    parser.add_argument('-in_pos', '--in_pos_path', type=str, required=False, default=None,
-        desc="Input pos file (xxx.xxx.pos.txt), optional; if not given, will randomly generate")
+        help="Input spider tables file (tables.json)")
+    parser.add_argument('-in_dbs_dir', '--input_database_dir', type=str, required=True,
+        help="Dir with spider databases")
+    parser.add_argument('-pb_in_dir', '--probing_data_in_dir', type=str, required=False,
+        help="The directory with input probing data files (e.g. from rat-sql)")
+    parser.add_argument('-sz', '--ds_size', type=int, required=False, default=500,
+        help="Only used when no 'in_pos' given. Use X samples from original dataset to collect probing samples.")
     parser.add_argument('-mo', '--max_occ', type=int, required=False, default=1,
-        desc="Only used when no 'in_pos' given. For each spider sample, include at most M probing samples per relation type.")
-    parser.add_argument('-pb_dir', '--probing_data_dir', type=str, required=True,
-        desc="The directory with probing data files")
+        help="Only used when no 'in_pos' given. For each spider sample, include at most X probing samples per relation type.")
+    parser.add_argument('-pb_out_dir', '--probing_data_out_dir', type=str, required=True,
+        help="The directory to have output probing data files (for uskg)")
 
     args = parser.parse_args()
 

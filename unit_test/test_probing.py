@@ -46,35 +46,104 @@ from language.xsp.data_preprocessing import spider_preprocessing, wikisql_prepro
 from sdra import probing_data_utils as pb_utils
 
 from sdra.probing_data_collect import _random_select_indices
+from sdra.probing_data_utils import get_USKG_node_encodings
 
 
 def _random_select_indices_TEST():
-	orig_len = 12
-	k = 5
-	train_ids = _random_select_indices(orig_len=orig_len, k=k, ds='train')
-	test_ids = _random_select_indices(orig_len=orig_len, k=k, ds='test')
+    orig_len = 12
+    k = 5
+    train_ids = _random_select_indices(orig_len=orig_len, k=k, ds='train')
+    test_ids = _random_select_indices(orig_len=orig_len, k=k, ds='test')
 
-	# do sth else 
-	_s = 0
-	for i in range(10):
-		_s += random.choice(range(i+1))
+    # do sth else 
+    _s = 0
+    for i in range(10):
+        _s += random.choice(range(i+1))
 
-	test_ids_2 = _random_select_indices(orig_len=orig_len, k=k, ds='test')
-	train_ids_2 = _random_select_indices(orig_len=orig_len, k=k, ds='train')
+    test_ids_2 = _random_select_indices(orig_len=orig_len, k=k, ds='test')
+    train_ids_2 = _random_select_indices(orig_len=orig_len, k=k, ds='train')
 
-	try:
-		assert train_ids == train_ids_2, (train_ids, train_ids_2)
-		assert test_ids == test_ids_2, (test_ids, test_ids_2)
-		corr = True
-	except AssertionError as e:
-		print(e)
-		corr = False
+    try:
+        assert train_ids == train_ids_2, (train_ids, train_ids_2)
+        assert test_ids == test_ids_2, (test_ids, test_ids_2)
+        corr = True
+    except AssertionError as e:
+        print(e)
+        corr = False
 
-	return corr
+    return corr
+
+
+def tokenizer_TEST():
+    ## Adapted from load_model_and_tokenizer()
+    save_argv = sys.argv
+
+    # Set args here for runnning on notebook, we make them out here to make it more illustrative.
+    sys.argv = ['/usr/local/lib/python3.7/dist-packages/ipykernel_launcher.py', # This is the name of your .py launcher when you run this line of code.
+                # belows are the parameters we set, take spider for example
+                '--cfg', 'Salesforce/T5_large_prefix_spider_with_cell_value.cfg', 
+                '--output_dir', './tmp']
+    parser = HfArgumentParser((WrappedSeq2SeqTrainingArguments,))
+    training_args, = parser.parse_args_into_dataclasses()
+    set_seed(training_args.seed)
+    args = Configure.Get(training_args.cfg)
+
+    sys.argv = save_argv
+
+    # TODO: add model_path to args 
+    model_path = 'hkunlp/from_all_T5_large_prefix_spider_with_cell_value2'
+    # model_path = 'hkunlp/from_all_T5_large_prefix_spider_with_cell_value2'
+    # model_path = '/Users/mac/Desktop/syt/Deep-Learning/Repos/UnifiedSKG/output/server_runs/A-T5_base_prefix_spider_with_cell_value-asr_mixed/checkpoint-79500/'
+    # model_path = '/Users/mac/Desktop/syt/Deep-Learning/Repos/UnifiedSKG/output/server_runs/A-T5_base_prefix_spider_with_cell_value-rewritten_mixed/checkpoint-56500/'
+
+    # tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)
+    model = Model(args)
+    model.load(model_path)
+
+    # for word/token/char mapping functions
+    # tokenizer_uskg = AutoTokenizer.from_pretrained(model_path, use_fast=False)
+    tokenizer_base = AutoTokenizer.from_pretrained('t5-base', use_fast=True)
+    tokenizer_large = AutoTokenizer.from_pretrained('t5-large', use_fast=True)
+
+    uskg_schemas_dict = pb_utils.precompute_spider_uskg_schemas_dict(
+        orig_tables_path='/home/yshao/Projects/language/language/xsp/data/spider/tables.json',
+        db_dir='/home/yshao/Projects/language/language/xsp/data/spider/database')
+
+    dataset_path = os.path.join('/home/yshao/Projects/SDR-analysis/data/spider/dev+ratsql_graph.json')
+    with open(dataset_path, 'r') as f:
+        orig_dataset = json.load(f)
+    for d in orig_dataset:
+        d['rat_sql_graph']['relations'] = json.loads(d['rat_sql_graph']['relations'])
+
+    for sid, sample in enumerate(tqdm(orig_dataset, ascii=True)):
+        # enc_uskg = get_USKG_node_encodings(sample, model, tokenizer_uskg, uskg_schemas_dict, tokenizer_args=None, pooling_func=None, debug=False)
+        enc_base = get_USKG_node_encodings(sample, model, tokenizer_base, uskg_schemas_dict, tokenizer_args=None, pooling_func=None, debug=False)
+        enc_large = get_USKG_node_encodings(sample, model, tokenizer_large, uskg_schemas_dict, tokenizer_args=None, pooling_func=None, debug=False)
+
+        if np.allclose(enc_base, enc_large, atol=1e-3):
+            pass
+        else:
+            enc_diff = np.max(enc_base, enc_large) - np.min(enc_base, enc_large) # (seq_len, enc_dim)
+            enc_diff = np.amax(enc_diff, axis=-1)   # (seq_len,)
+            max_diff_pos = np.argmax(enc_diff)
+            print(sid, max_diff_pos, enc_diff[max_diff_pos])
+            print(enc_uskg[max_diff_pos][::300], enc_base[max_diff_pos][::300], enc_large[max_diff_pos][::300])
+            print()
+
+        # if np.allclose(enc_uskg, enc_base, atol=1e-3) and np.allclose(enc_uskg, enc_large, atol=1e-3):
+        #     pass
+        # else:
+        #     enc_diff = np.amax([enc_uskg, enc_base, enc_large], axis=0) - np.amin([enc_uskg, enc_base, enc_large], axis=0) # (seq_len, enc_dim)
+        #     enc_diff = np.amax(enc_diff, axis=-1)   # (seq_len,)
+        #     max_diff_pos = np.argmax(enc_diff)
+        #     print(sid, max_diff_pos, enc_diff[max_diff_pos])
+        #     print(enc_uskg[max_diff_pos][::300], enc_base[max_diff_pos][::300], enc_large[max_diff_pos][::300])
+        #     print()
 
 
 if __name__ == '__main__':
-	print(_random_select_indices_TEST())
+    # print(_random_select_indices_TEST())
+    tokenizer_TEST()
 
 
 

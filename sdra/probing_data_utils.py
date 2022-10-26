@@ -41,6 +41,63 @@ from third_party.miscs.bridge_content_encoder import get_database_matches
 
 from language.xsp.data_preprocessing import spider_preprocessing, wikisql_preprocessing, michigan_preprocessing
 
+from sdr_analysis.helpers.general_helpers import db_dict_to_general_fmt, collect_link_prediction_samples
+
+
+RAT_SQL_RELATION_ID2NAME = {
+    0: ('qq_dist', -2),
+    1: ('qq_dist', -1),
+    2: ('qq_dist', 0),
+    3: ('qq_dist', 1),
+    4: ('qq_dist', 2),
+    5: 'qc_default',
+    6: 'qt_default',
+    7: 'cq_default',
+    8: 'cc_default',
+    9: 'cc_foreign_key_forward',
+    10: 'cc_foreign_key_backward',
+    11: 'cc_table_match',
+    12: ('cc_dist', -2),
+    13: ('cc_dist', -1),
+    14: ('cc_dist', 0),
+    15: ('cc_dist', 1),
+    16: ('cc_dist', 2),
+    17: 'ct_default',
+    18: 'ct_foreign_key',
+    19: 'ct_primary_key',
+    20: 'ct_table_match',
+    21: 'ct_any_table',
+    22: 'tq_default',
+    23: 'tc_default',
+    24: 'tc_primary_key',
+    25: 'tc_table_match',
+    26: 'tc_any_table',
+    27: 'tc_foreign_key',
+    28: 'tt_default',
+    29: 'tt_foreign_key_forward',
+    30: 'tt_foreign_key_backward',
+    31: 'tt_foreign_key_both',
+    32: ('tt_dist', -2),
+    33: ('tt_dist', -1),
+    34: ('tt_dist', 0),
+    35: ('tt_dist', 1),
+    36: ('tt_dist', 2),
+    37: 'qcCEM',
+    38: 'cqCEM',
+    39: 'qtTEM',
+    40: 'tqTEM',
+    41: 'qcCPM',
+    42: 'cqCPM',
+    43: 'qtTPM',
+    44: 'tqTPM',
+    45: 'qcNUMBER',
+    46: 'cqNUMBER',
+    47: 'qcTIME',
+    48: 'cqTIME',
+    49: 'qcCELLMATCH',
+    50: 'cqCELLMATCH'
+}
+
 
 
 def general_fmt_dict_to_uskg_schema(general_fmt_dict):
@@ -194,14 +251,14 @@ def serialize_schema(
 
 
 
-def precompute_spider_uskg_schemas_dict(orig_tables_path):
+def precompute_spider_uskg_schemas_dict(orig_tables_path, db_dir):
     uskg_schemas_dict = dict()
 
     spider_dbs_dict = spider_preprocessing.load_spider_tables(orig_tables_path)
 
     for db_id, db_dict in spider_dbs_dict.items():
         general_fmt_dict = db_dict_to_general_fmt(db_dict, db_id,
-                                                  sqlite_path=os.path.join(xsp_data_dir, f"spider/database/{db_id}/{db_id}.sqlite"),
+                                                  sqlite_path=os.path.join(db_dir, f"{db_id}/{db_id}.sqlite"),
                                                   rigorous_foreign_key=True)
         
         uskg_schema = general_fmt_dict_to_uskg_schema(general_fmt_dict)
@@ -217,7 +274,7 @@ def uskg_sample_to_struct_input(uskg_sample, uskg_schemas_dict):
     
     return serialize_schema(
         question=uskg_sample["question"],
-        db_path=uskg_sample["db_path"],
+        db_path=uskg_schema["db_path"],
         db_id=db_id,
         db_column_names=uskg_schema["db_column_names"],
         db_table_names=uskg_schema["db_table_names"],
@@ -327,22 +384,34 @@ class StructCharRangesCollector:
 
 
 
-## Combine experiment codes 
-def collect_node_char_ranges(sample, tokenizer=None, tokenizer_args=None, txt=None, tokenized_txt=None, debug=False):
-    text_in = sample['question']
-    struct_in = uskg_sample_to_struct_input(sample)
-    _splitter = "; structed knowledge: "
+def collect_node_char_ranges(sample, tokenizer=None, tokenizer_args=None, txt=None, tokenized_txt=None, uskg_schemas_dict=None, debug=False):
+    if 'txt_pieces' in sample:
+        # use precomputed (ignoring input params)
+        text_in = sample['txt_pieces']['text_in']
+        struct_in = sample['txt_pieces']['struct_in']
+        _splitter = sample['txt_pieces']['splitter']
+        txt = sample['txt_pieces']['txt']
+        tokenized_txt = sample['txt_pieces']['tokenized_txt']
+    else:
+        # use input params or recompute
+        text_in = sample['question']
+        struct_in = uskg_sample_to_struct_input(sample, uskg_schemas_dict)
+        _splitter = "; structed knowledge: "
     
-    if tokenizer_args is None:
-        tokenizer_args = dict()
+        if tokenizer_args is None:
+            tokenizer_args = dict()
+            
+        if txt is None:
+            txt = "{}{}{}".format(text_in, _splitter, struct_in)
         
-    if txt is None:
-        txt = "{}{}{}".format(text_in, _splitter, struct_in)
-    
-    if tokenized_txt is None:
-        # tokenized_txt = tokenizer([txt], max_length=1024, padding="max_length", truncation=True)
-        tokenized_txt = tokenizer([txt], **tokenizer_args)
-        ## possible problem: exceeding max length!
+        if tokenized_txt is None:
+            # tokenized_txt = tokenizer([txt], max_length=1024, padding="max_length", truncation=True)
+            tokenized_txt = tokenizer([txt], **tokenizer_args)
+            ## possible problem: exceeding max length!
+
+    _num_tokens = sum(tokenized_txt.data['attention_mask'][0])
+    if _num_tokens > 1000:
+        print(f'WARNING: db_id = {sample["db_id"]}, _num_tokens = {_num_tokens}')
     
     ratsql_graph_nodes = sample['rat_sql_graph']['nodes']
 #     question_toks = sample['question_toks']
@@ -440,13 +509,13 @@ def collect_node_char_ranges(sample, tokenizer=None, tokenizer_args=None, txt=No
     
 
 
-def get_USKG_node_encodings(sample, model, tokenizer, tokenizer_args=None, pooling_func=None, debug=False):
+def get_USKG_node_encodings(sample, model, tokenizer, uskg_schemas_dict, tokenizer_args=None, pooling_func=None, debug=False):
     """
     Args:
         pooling_func (Callable): np.array(n_pieces, dim) ==> np.array(dim,); default is np.mean
     """
     text_in = sample['question']
-    struct_in = uskg_sample_to_struct_input(sample)
+    struct_in = uskg_sample_to_struct_input(sample, uskg_schemas_dict)
     
     _splitter = "; structed knowledge: "
     txt = "{}{}{}".format(text_in, _splitter, struct_in)
@@ -461,6 +530,15 @@ def get_USKG_node_encodings(sample, model, tokenizer, tokenizer_args=None, pooli
         pooling_func = lambda l: np.mean(l, axis=0)
         
     tokenized_txt = tokenizer([txt], **tokenizer_args)
+
+    # YS: added
+    sample['txt_pieces'] = {
+        'text_in': text_in,
+        'struct_in': struct_in,
+        'splitter': _splitter,
+        'txt': txt,
+        'tokenized_txt': tokenized_txt,
+    }
     
     # Get encoding tensor 
     with torch.no_grad():
@@ -532,7 +610,7 @@ def extract_probing_samples_link_prediction_uskg(dataset_sample,
     """
     Args:
         dataset_sample (Dict): a sample dict from spider dataset
-        db_schemas_dict (Dict): db_id => db_schema, precomputed for all DBs (not used here)
+        db_schemas_dict (Dict): db_id => db_schema, precomputed for all DBs
         model (EncDec): the rat-sql model
         pos (List[Tuple]): the position pairs to use. If none, will randomly generate
         max_rel_occ (int): each relation occur at most this many times in each (original) sample
@@ -556,9 +634,10 @@ def extract_probing_samples_link_prediction_uskg(dataset_sample,
     # get encodings
     # rat_sql_encoder_state = get_rat_sql_encoder_state(question=question, db_schema=db_schema, model=model)
     # enc_repr = rat_sql_encoder_state.memory.squeeze(0).detach().cpu().numpy()
-    enc_repr = Get_USKG_node_encodings(sample=dataset_sample,
+    enc_repr = get_USKG_node_encodings(sample=dataset_sample,
                                        model=model,
                                        tokenizer=tokenizer,
+                                       uskg_schemas_dict=db_schemas_dict,
                                        debug=debug)
     
     X, y, pos = collect_link_prediction_samples(
