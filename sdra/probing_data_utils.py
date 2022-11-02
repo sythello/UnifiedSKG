@@ -252,6 +252,7 @@ def serialize_schema(
 
 
 def precompute_spider_uskg_schemas_dict(orig_tables_path, db_dir):
+    """ Get the uskg schemas of all spider databases. """
     uskg_schemas_dict = dict()
 
     spider_dbs_dict = spider_preprocessing.load_spider_tables(orig_tables_path)
@@ -269,6 +270,7 @@ def precompute_spider_uskg_schemas_dict(orig_tables_path, db_dir):
 
 
 def uskg_sample_to_struct_input(uskg_sample, uskg_schemas_dict):
+    """ Build the struct_in for a uskg_sample. """
     db_id = uskg_sample["db_id"]
     uskg_schema = uskg_schemas_dict[db_id]
     
@@ -385,6 +387,9 @@ class StructCharRangesCollector:
 
 
 def collect_node_char_ranges(sample, tokenizer=None, tokenizer_args=None, txt=None, tokenized_txt=None, uskg_schemas_dict=None, debug=False):
+    """
+    Return the char ranges in the txt corresponding to each node. Help building the node-token mapping.
+    """
     if 'txt_pieces' in sample:
         # use precomputed (ignoring input params)
         text_in = sample['txt_pieces']['text_in']
@@ -611,7 +616,7 @@ def extract_probing_samples_link_prediction_uskg(dataset_sample,
     Args:
         dataset_sample (Dict): a sample dict from spider dataset
         db_schemas_dict (Dict): db_id => db_schema, precomputed for all DBs
-        model (EncDec): the rat-sql model
+        model: the uskg model (custom T5ForConditionalGeneration)
         pos (List[Tuple]): the position pairs to use. If none, will randomly generate
         max_rel_occ (int): each relation occur at most this many times in each (original) sample
     

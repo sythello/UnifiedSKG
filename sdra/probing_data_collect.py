@@ -70,7 +70,7 @@ def _random_select_indices(orig_len, k, ds, seed=42):
     return sel_ids
 
 
-def load_model_and_tokenizer(args):
+def load_model_and_tokenizer(main_args):
     save_argv = sys.argv
 
     # Set args here for runnning on notebook, we make them out here to make it more illustrative.
@@ -111,6 +111,9 @@ def collect_probing_dataset(args,
         orig_ds,
         prob_ds,
         **extra_kwargs):
+    """
+    The main process of data collection (for a single orig_ds and prob_ds, e.g. for dev.test)
+    """
 
     if args.probing_data_in_dir is not None:
         pos_file_path = os.path.join(args.probing_data_in_dir, f'{orig_ds}.{prob_ds}.pos.txt')
@@ -131,9 +134,11 @@ def collect_probing_dataset(args,
                 sample_ds_indices.append(ds_idx)
             pos_per_sample[ds_idx].append((i, j))
         # len(sample_ds_indices), len(pos_per_sample)
+        print(f'Loaded pos file from {pos_file_path}: {len(all_pos_triplets)} triplets, {len(sample_ds_indices)} orig samples')
     else:
         pos_per_sample = defaultdict(lambda: None)
         sample_ds_indices = _random_select_indices(orig_len=len(orig_dataset), k=args.ds_size, ds=prob_ds, seed=42)
+        print(f'Generated pos: {len(sample_ds_indices)} orig samples')
 
 
     all_X = []
@@ -237,9 +242,9 @@ if __name__ == '__main__':
     parser.add_argument('-pb_in_dir', '--probing_data_in_dir', type=str, required=False,
         help="The directory with input probing data files (e.g. from rat-sql)")
     parser.add_argument('-sz', '--ds_size', type=int, required=False, default=500,
-        help="Only used when no 'in_pos' given. Use X samples from original dataset to collect probing samples.")
+        help="Only used when no 'pb_in_dir' given. Use X samples from original dataset to collect probing samples.")
     parser.add_argument('-mo', '--max_occ', type=int, required=False, default=1,
-        help="Only used when no 'in_pos' given. For each spider sample, include at most X probing samples per relation type.")
+        help="Only used when no 'pb_in_dir' given. For each spider sample, include at most X probing samples per relation type.")
     parser.add_argument('-pb_out_dir', '--probing_data_out_dir', type=str, required=True,
         help="The directory to have output probing data files (for uskg)")
 
