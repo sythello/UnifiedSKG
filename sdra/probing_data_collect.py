@@ -10,7 +10,8 @@ from transformers import (
 )
 from utils.configue import Configure
 from utils.training_arguments import WrappedSeq2SeqTrainingArguments
-from models.unified.prefixtuning import Model
+# from models.unified.prefixtuning import Model
+from models.unified import finetune, prefixtuning
 from argparse import ArgumentParser
 
 import nltk
@@ -76,31 +77,49 @@ def load_model_and_tokenizer(main_args):
     # Set args here for runnning on notebook, we make them out here to make it more illustrative.
     sys.argv = ['/usr/local/lib/python3.7/dist-packages/ipykernel_launcher.py', # This is the name of your .py launcher when you run this line of code.
                 # belows are the parameters we set, take spider for example
-                '--cfg', 'Salesforce/T5_large_prefix_spider_with_cell_value.cfg', 
+                # '--cfg', 'Salesforce/T5_large_prefix_spider_with_cell_value.cfg', 
+                '--cfg', main_args.uskg_config,
                 '--output_dir', './tmp']
     parser = HfArgumentParser((WrappedSeq2SeqTrainingArguments,))
     training_args, = parser.parse_args_into_dataclasses()
     set_seed(training_args.seed)
-    args = Configure.Get(training_args.cfg)
+    model_args = Configure.Get(training_args.cfg)
 
     sys.argv = save_argv
 
-    # TODO: add model_path to args 
-    model_path = 'hkunlp/from_all_T5_large_prefix_spider_with_cell_value2'
-    # model_path = 'hkunlp/from_all_T5_large_prefix_spider_with_cell_value2'
-    # model_path = '/Users/mac/Desktop/syt/Deep-Learning/Repos/UnifiedSKG/output/server_runs/A-T5_base_prefix_spider_with_cell_value-asr_mixed/checkpoint-79500/'
-    # model_path = '/Users/mac/Desktop/syt/Deep-Learning/Repos/UnifiedSKG/output/server_runs/A-T5_base_prefix_spider_with_cell_value-rewritten_mixed/checkpoint-56500/'
-
+    ## Tokenizer: 'fast' for word/token/char mapping functions
     # tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)
+    print('Using tokenizer:', model_args.bert.location)
+    tokenizer_fast = AutoTokenizer.from_pretrained(model_args.bert.location, use_fast=True)
 
-    # for word/token/char mapping functions
-    tokenizer_fast = AutoTokenizer.from_pretrained('t5-large', use_fast=True)
+    ## Model: for model_path, now support: USKG (hkunlp/xxx); original T5 (t5-xxx); random T5 (t5-xxx-rd)
+    model_path = main_args.model_path
+    if model_path.startswith('hkunlp'):
+        ## USKG
+        if 'prefix' in model_path:
+            assert 'prefix' in main_args.uskg_config, ('Mismatch', model_path, uskg_config)
+            model = prefixtuning.Model(model_args)
+        elif 'finetune' in model_path:
+            assert 'finetune' in main_args.uskg_config, ('Mismatch', model_path, uskg_config)
+            model = finetune.Model(model_args)
+        else:
+            raise ValueError(model_path)
 
-    model = Model(args)
-    model.load(model_path)
+        model.load(model_path)
+
+    elif model_path.startswith('t5'):
+        model = finetune.Model(model_args)
+        assert model_path.startswith(model_args.bert.location), ('Mismatch', model_path, model_args.bert.location)  # check USKG & T5 version consistency
+        if model_path.endswith('rd'):
+            ## random T5
+            model.pretrain_model.init_weights()
+        else:
+            ## original T5, already loaded
+            pass
+    else:
+        raise ValueError(model_path)
 
     return model, tokenizer_fast
-
 
 
 def collect_probing_dataset(args,
@@ -145,7 +164,7 @@ def collect_probing_dataset(args,
     all_y = []
     all_pos = []
 
-    for sample_ds_idx in tqdm(sample_ds_indices, ascii=True):
+    for sample_ds_idx in tqdm(sample_ds_indices, ascii=True, desc=f'{orig_ds}.{prob_ds}'):
         dataset_sample = orig_dataset[sample_ds_idx]
         pos_list = pos_per_sample[sample_ds_idx]
 
@@ -245,6 +264,12 @@ if __name__ == '__main__':
         help="Only used when no 'pb_in_dir' given. Use X samples from original dataset to collect probing samples.")
     parser.add_argument('-mo', '--max_occ', type=int, required=False, default=1,
         help="Only used when no 'pb_in_dir' given. For each spider sample, include at most X probing samples per relation type.")
+
+    parser.add_argument('-model', '--model_path', type=str, required=False, default='hkunlp/from_all_T5_large_prefix_spider_with_cell_value2',
+        help="The (T5) model to use. Now support: USKG (hkunlp/xxx); original T5 (t5-xxx); random T5 (t5-xxx-rd)")
+    parser.add_argument('-cfg', '--uskg_config', type=str, required=False, default='Salesforce/T5_large_prefix_spider_with_cell_value.cfg',
+        help="The USKG config file (Salesforce/xxx) to use.")
+    
     parser.add_argument('-pb_out_dir', '--probing_data_out_dir', type=str, required=True,
         help="The directory to have output probing data files (for uskg)")
 

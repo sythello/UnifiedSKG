@@ -10,10 +10,9 @@ from transformers import (
 )
 from utils.configue import Configure
 from utils.training_arguments import WrappedSeq2SeqTrainingArguments
-from models.unified.prefixtuning import Model
+# from models.unified.prefixtuning import Model
+from models.unified import finetune, prefixtuning
 from argparse import ArgumentParser
-
-import nltk
 
 import json
 from copy import deepcopy
@@ -21,6 +20,7 @@ from collections import Counter, defaultdict
 import importlib
 import pickle
 import random
+import types
 
 from seq2seq_construction import spider
 from third_party.spider.preprocess.get_tables import dump_db_json_schema
@@ -28,6 +28,7 @@ from third_party.spider.preprocess.get_tables import dump_db_json_schema
 import numpy as np
 from tqdm import tqdm
 import editdistance
+import nltk
 from nltk.translate.bleu_score import corpus_bleu
 from nltk.tokenize.treebank import TreebankWordDetokenizer
 
@@ -45,8 +46,8 @@ from language.xsp.data_preprocessing import spider_preprocessing, wikisql_prepro
 
 from sdra import probing_data_utils as pb_utils
 
-from sdra.probing_data_collect import _random_select_indices
-from sdra.probing_data_utils import get_USKG_node_encodings
+from sdra.probing_data_collect import _random_select_indices, load_model_and_tokenizer
+from sdra.probing_data_utils import get_USKG_node_encodings, play_pred
 
 
 def _random_select_indices_TEST():
@@ -141,9 +142,41 @@ def tokenizer_TEST():
         #     print()
 
 
+def model_TEST():
+    struct_in = "| concert_singer | stadium : stadium_id , location , name , capacity , highest , lowest , average | singer : singer_id , name , country ( France ) , song_name , song_release_year , age , is_male | concert : concert_id , concert_name , theme , stadium_id , year | singer_in_concert : concert_id , singer_id"
+    text_in = "what is the minimum, average, and maximum age of all singers from France?"
+
+    main_args = types.SimpleNamespace()
+
+    # Model1: USKG (T5-base-prefix)
+    main_args.model_path = 'hkunlp/from_all_T5_base_prefix_spider_with_cell_value2'
+    main_args.uskg_config = 'Salesforce/T5_base_prefix_spider_with_cell_value.cfg'
+    model, tokenizer = load_model_and_tokenizer(main_args)
+
+    sql_pred_1 = play_pred("{}; structed knowledge: {}".format(text_in, struct_in), model, tokenizer)
+
+    # Model2: T5-base
+    main_args.model_path = 't5-base'
+    main_args.uskg_config = 'Salesforce/T5_base_finetune_spider_with_cell_value.cfg'
+    model, tokenizer = load_model_and_tokenizer(main_args)
+
+    sql_pred_2 = play_pred("{}; structed knowledge: {}".format(text_in, struct_in), model, tokenizer)
+
+    # Model3: T5-base-random
+    main_args.model_path = 't5-base-rd'
+    main_args.uskg_config = 'Salesforce/T5_base_finetune_spider_with_cell_value.cfg'
+    model, tokenizer = load_model_and_tokenizer(main_args)
+
+    sql_pred_3 = play_pred("{}; structed knowledge: {}".format(text_in, struct_in), model, tokenizer)
+
+    print('USKG (T5-base-prefix):', sql_pred_1)
+    print('T5-base:', sql_pred_2)
+    print('T5-base-random:', sql_pred_3)
+
+
 if __name__ == '__main__':
     # print(_random_select_indices_TEST())
-    tokenizer_TEST()
+    model_TEST()
 
 
 

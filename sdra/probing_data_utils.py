@@ -10,7 +10,8 @@ from transformers import (
 )
 from utils.configue import Configure
 from utils.training_arguments import WrappedSeq2SeqTrainingArguments
-from models.unified.prefixtuning import Model
+# from models.unified.prefixtuning import Model
+from models.unified import finetune, prefixtuning
 
 import nltk
 
@@ -267,6 +268,26 @@ def precompute_spider_uskg_schemas_dict(orig_tables_path, db_dir):
         uskg_schemas_dict[db_id] = uskg_schema
 
     return uskg_schemas_dict
+
+
+
+def precompute_wikisql_uskg_schemas_dict(orig_tables_path, db_dir):
+    """ Get the uskg schemas of all wikisql databases (actually wikisql is a single database, and we load each table as a "database" here). """
+    uskg_schemas_dict = dict()
+
+    spider_dbs_dict = spider_preprocessing.load_spider_tables(orig_tables_path)
+
+    for db_id, db_dict in spider_dbs_dict.items():
+        general_fmt_dict = db_dict_to_general_fmt(db_dict, db_id,
+                                                  sqlite_path=os.path.join(db_dir, f"{db_id}/{db_id}.sqlite"),
+                                                  rigorous_foreign_key=True)
+        
+        uskg_schema = general_fmt_dict_to_uskg_schema(general_fmt_dict)
+        
+        uskg_schemas_dict[db_id] = uskg_schema
+
+    return uskg_schemas_dict
+
 
 
 def uskg_sample_to_struct_input(uskg_sample, uskg_schemas_dict):
@@ -547,17 +568,25 @@ def get_USKG_node_encodings(sample, model, tokenizer, uskg_schemas_dict, tokeniz
     
     # Get encoding tensor 
     with torch.no_grad():
-        past_prompt = model.get_prompt(
-            bsz=1,              # bsz = input_ids.shape[0]
-            sample_size=1,      # sample_size=kwargs['num_beams']
-            description=None,   
-            knowledge=None,     
-        )
-        encoder_outputs = model.pretrain_model.encoder(
-            input_ids=torch.LongTensor(tokenized_txt.data['input_ids']),
-            attention_mask=torch.LongTensor(tokenized_txt.data['attention_mask']),
-            past_prompt=past_prompt,
-        )
+        if isinstance(model, prefixtuning.Model):
+            past_prompt = model.get_prompt(
+                bsz=1,              # bsz = input_ids.shape[0]
+                sample_size=1,      # sample_size=kwargs['num_beams']
+                description=None,   
+                knowledge=None,     
+            )
+            encoder_outputs = model.pretrain_model.encoder(
+                input_ids=torch.LongTensor(tokenized_txt.data['input_ids']),
+                attention_mask=torch.LongTensor(tokenized_txt.data['attention_mask']),
+                past_prompt=past_prompt,
+            )
+        else:
+            # model: finetune.Model
+            encoder_outputs = model.pretrain_model.encoder(
+                input_ids=torch.LongTensor(tokenized_txt.data['input_ids']),
+                attention_mask=torch.LongTensor(tokenized_txt.data['attention_mask']),
+            )
+
     encoder_output_hidden_states = encoder_outputs.last_hidden_state.detach().squeeze(0).cpu().numpy()
     if debug:
         print('encoder_output_hidden_states:', encoder_output_hidden_states.shape)
@@ -655,7 +684,18 @@ def extract_probing_samples_link_prediction_uskg(dataset_sample,
     return X, y, pos
 
 
-
+def play_pred(txt, model, tokenizer):
+    tokenized_txt = tokenizer([txt], max_length=1024, padding="max_length", truncation=True)
+    pred = tokenizer.batch_decode(
+      model.generate(
+        torch.LongTensor(tokenized_txt.data['input_ids']),
+        torch.LongTensor(tokenized_txt.data['attention_mask']),
+        num_beams=1, 
+        max_length=256
+        ), 
+      skip_special_tokens=True 
+    )
+    return pred
 
 
 
