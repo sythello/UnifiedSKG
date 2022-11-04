@@ -44,8 +44,7 @@ from third_party.miscs.bridge_content_encoder import get_database_matches
 
 from language.xsp.data_preprocessing import spider_preprocessing, wikisql_preprocessing, michigan_preprocessing
 
-from sdr_analysis.helpers.general_helpers import SDRASampleError
-from sdra import probing_data_utils as pb_utils
+from sdra.legacy import probing_data_utils as pb_utils
 
 
 def _random_select_indices(orig_len, k, ds, seed=42):
@@ -126,7 +125,6 @@ def load_model_and_tokenizer(main_args):
 def collect_probing_dataset(args,
         model,
         tokenizer_fast,
-        probe_data_collector,
         uskg_schemas_dict,
         orig_dataset,
         orig_ds,
@@ -171,7 +169,7 @@ def collect_probing_dataset(args,
         pos_list = pos_per_sample[sample_ds_idx]
 
         try:
-            X, y, pos = probe_data_collector.extract_probing_samples_link_prediction(
+            X, y, pos = pb_utils.extract_probing_samples_link_prediction_uskg(
                 dataset_sample=dataset_sample,
                 db_schemas_dict=uskg_schemas_dict,
                 model=model,
@@ -184,8 +182,8 @@ def collect_probing_dataset(args,
             all_y.extend(y)
             pos = [(sample_ds_idx, i, j) for i, j in pos]   # add sample idx 
             all_pos.extend(pos)
-        except SDRASampleError as e:
-            # when input too long, we throw this error
+        except TypeError as e:
+            # input too long will cause this error
             print(f'WARNING: sample {sample_ds_idx} txt too long, skipped')
             continue
         except Exception as e:
@@ -221,21 +219,14 @@ def main(args):
     # xsp_data_dir = "/Users/mac/Desktop/syt/Deep-Learning/Repos/Google-Research-Language/language/language/xsp/data"
     # spider_tables_path = os.path.join(xsp_data_dir, 'spider', 'tables.json')
 
-    if args.dataset == 'spider':
-        probe_data_collector = pb_utils.LinkPredictionDataCollector_USKG_spider()
-    elif args.dataset == 'wikisql':
-        probe_data_collector = pb_utils.LinkPredictionDataCollector_USKG_wikisql()
-    else:
-        raise ValueError(args.dataset)
-
-    uskg_schemas_dict = probe_data_collector.precompute_schemas_dict(
-        orig_tables_path=args.tables_path,
-        db_path=args.db_path)
+    # TODO: extend to wikisql 
+    uskg_schemas_dict = pb_utils.precompute_spider_uskg_schemas_dict(
+        orig_tables_path=args.in_tables_path,
+        db_dir=args.input_database_dir)
 
     kwargs = {
         'model': model,
         'tokenizer_fast': tokenizer_fast,
-        'probe_data_collector': probe_data_collector,
         'uskg_schemas_dict': uskg_schemas_dict,
     }
 
@@ -243,7 +234,7 @@ def main(args):
     prob_ds_list = ['train', 'test']
     for orig_ds in orig_ds_list:
         # dataset_path = f"/Users/mac/Desktop/syt/Deep-Learning/Projects-M/SDR-analysis/data/spider/{orig_ds}+ratsql_graph.json"
-        dataset_path = os.path.join(args.dataset_dir, f'{orig_ds}+ratsql_graph.json')
+        dataset_path = os.path.join(args.input_spider_dir, f'{orig_ds}+ratsql_graph.json')
         with open(dataset_path, 'r') as f:
             orig_dataset = json.load(f)
         for d in orig_dataset:
@@ -262,17 +253,14 @@ def main(args):
 if __name__ == '__main__':
     parser = ArgumentParser()
 
-    parser.add_argument('-ds', '--dataset', type=str, required=True,
-        help="Which dataset; now support 'spider' and 'wikisql'.")
-
-    parser.add_argument('-dataset_dir', '--dataset_dir', type=str, required=True,
+    parser.add_argument('-in_spider_dir', '--input_spider_dir', type=str, required=True,
         help="Dir with input spider dataset files (xxx+rat_sql_graph.json)")
-    parser.add_argument('-tables_path', '--tables_path', type=str, required=True,
+    parser.add_argument('-in_tables', '--in_tables_path', type=str, required=True,
         help="Input spider tables file (tables.json)")
-    parser.add_argument('-db_path', '--db_path', type=str, required=True,
-        help="Path to databases. spider: db dir; wikisql: db file")
+    parser.add_argument('-in_dbs_dir', '--input_database_dir', type=str, required=True,
+        help="Dir with spider databases")
     parser.add_argument('-pb_in_dir', '--probing_data_in_dir', type=str, required=False,
-        help="The directory with input probing data files (to load pos file from)")
+        help="The directory with input probing data files (e.g. from rat-sql)")
     parser.add_argument('-sz', '--ds_size', type=int, required=False, default=500,
         help="Only used when no 'pb_in_dir' given. Use X samples from original dataset to collect probing samples.")
     parser.add_argument('-mo', '--max_occ', type=int, required=False, default=1,

@@ -44,10 +44,10 @@ from third_party.miscs.bridge_content_encoder import get_database_matches
 
 from language.xsp.data_preprocessing import spider_preprocessing, wikisql_preprocessing, michigan_preprocessing
 
-from sdra import probing_data_utils as pb_utils
+from sdra.legacy import probing_data_utils as pb_utils
 
-from sdra.probing_data_collect import _random_select_indices, load_model_and_tokenizer
-from sdra.probing_data_utils import get_USKG_node_encodings, play_pred
+from sdra.legacy.probing_data_collect import _random_select_indices, load_model_and_tokenizer
+from sdra.legacy.probing_data_utils import get_USKG_node_encodings, play_pred
 
 
 def _random_select_indices_TEST():
