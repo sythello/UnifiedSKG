@@ -44,7 +44,8 @@ from third_party.miscs.bridge_content_encoder import get_database_matches
 from language.xsp.data_preprocessing import spider_preprocessing, wikisql_preprocessing, michigan_preprocessing
 
 from sdr_analysis.helpers import general_helpers
-from sdr_analysis.helpers.general_helpers import LinkPredictionDataCollector, SDRASampleError
+from sdr_analysis.helpers.general_helpers import SDRASampleError
+from sdr_analysis.helpers.general_helpers import LinkPredictionDataCollector, LinkPredictionDataCollector_spider, LinkPredictionDataCollector_wikisql
 # from sdr_analysis.helpers.general_helpers import db_dict_to_general_fmt, collect_link_prediction_samples, LinkPredictionDataCollector
 
 
@@ -131,6 +132,11 @@ class StructCharRangesCollector:
     def _register_curr_node(self):
         curr_node_name = ' '.join(self.curr_node_toks)
         curr_range = (self.curr_node_char_start, self.curr_node_char_end)
+
+        if None in curr_range:
+            print('- StructCharRangesCollector::_register_curr_node():')
+            print(f'* WARNING: invalid char span: name = {curr_node_name}, span = {curr_range}')
+            raise SDRASampleError('Invalid char span')
         
         if self.curr_node_type == 'db_id':
             self.db_id2char_ranges[curr_node_name] = curr_range
@@ -143,7 +149,7 @@ class StructCharRangesCollector:
             self.column2char_ranges[(self.curr_table, curr_node_name)] = curr_range
             self.column_char_ranges_list.append(curr_range)
         else:
-            raise ValueError(curr_node_type)
+            raise ValueError(self.curr_node_type)
 
         self.curr_node_toks = []
         self.curr_node_char_start = None
@@ -218,6 +224,59 @@ def play_pred(txt, model, tokenizer):
 
 
 class LinkPredictionDataCollector_USKG(LinkPredictionDataCollector):
+    def load_model(self, main_args):
+        save_argv = sys.argv
+
+        # Set args here for runnning on notebook, we make them out here to make it more illustrative.
+        sys.argv = ['/usr/local/lib/python3.7/dist-packages/ipykernel_launcher.py', # This is the name of your .py launcher when you run this line of code.
+                    # belows are the parameters we set, take spider for example
+                    # '--cfg', 'Salesforce/T5_large_prefix_spider_with_cell_value.cfg', 
+                    '--cfg', main_args.uskg_config,
+                    '--output_dir', './tmp']
+        parser = HfArgumentParser((WrappedSeq2SeqTrainingArguments,))
+        training_args, = parser.parse_args_into_dataclasses()
+        set_seed(training_args.seed)
+        model_args = Configure.Get(training_args.cfg)
+
+        sys.argv = save_argv
+
+        ## Tokenizer: 'fast' for word/token/char mapping functions
+        # tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)
+        print('Using tokenizer:', model_args.bert.location)
+        tokenizer_fast = AutoTokenizer.from_pretrained(model_args.bert.location, use_fast=True)
+
+        ## Model: for model_path, now support: USKG (hkunlp/xxx); original T5 (t5-xxx); random T5 (t5-xxx-rd)
+        model_path = main_args.model_path
+        if model_path.startswith('hkunlp'):
+            ## USKG
+            if 'prefix' in model_path:
+                assert 'prefix' in main_args.uskg_config, ('Mismatch', model_path, main_args.uskg_config)
+                model = prefixtuning.Model(model_args)
+            elif 'finetune' in model_path:
+                assert 'finetune' in main_args.uskg_config, ('Mismatch', model_path, main_args.uskg_config)
+                model = finetune.Model(model_args)
+            else:
+                raise ValueError(model_path)
+
+            model.load(model_path)
+
+        elif model_path.startswith('t5'):
+            model = finetune.Model(model_args)
+            assert model_path.startswith(model_args.bert.location), ('Mismatch', model_path, model_args.bert.location)  # check USKG & T5 version consistency
+            if model_path.endswith('rd'):
+                ## random T5
+                model.pretrain_model.init_weights()
+            else:
+                ## original T5, already loaded
+                pass
+        else:
+            raise ValueError(model_path)
+
+        self.model = model
+        self.tokenizer_fast = tokenizer_fast
+
+        return model, tokenizer_fast
+
     def general_fmt_dict_to_schema(self, general_fmt_dict):
         """
         Args:
@@ -287,22 +346,23 @@ class LinkPredictionDataCollector_USKG(LinkPredictionDataCollector):
         
         return uskg_schema
 
-    def precompute_schemas_dict(self, orig_tables_path, db_path):
-        raise NotImplementedError
+    # def precompute_schemas_dict(self, orig_tables_path, db_path):
+    #     raise NotImplementedError
 
-    def serialize_schema(self, question: str, db_path: str, db_id: str, db_column_names: Dict[str, str], db_table_names: List[str], schema_serialization_type: str = "peteshaw", schema_serialization_randomized: bool = False, schema_serialization_with_db_id: bool = True, schema_serialization_with_db_content: bool = False, normalize_query: bool = True) -> str:
-        raise NotImplementedError
+    # def serialize_schema(self, question: str, db_path: str, db_id: str, db_column_names: Dict[str, str], db_table_names: List[str], schema_serialization_type: str = "peteshaw", schema_serialization_randomized: bool = False, schema_serialization_with_db_id: bool = True, schema_serialization_with_db_content: bool = False, normalize_query: bool = True) -> str:
+    #     raise NotImplementedError
 
-    def sample_to_struct_input(self, sample, schemas_dict):
-        raise NotImplementedError
+    # def sample_to_struct_input(self, sample):
+    #     raise NotImplementedError
 
-    def get_node_encodings(self, sample, model, tokenizer, schemas_dict, tokenizer_args=None, pooling_func=None, debug=False):
+    def get_node_encodings(self, sample, tokenizer_args=None, pooling_func=None):
         """
         Args:
+            sample (Dict): must have 'question' for user input and 'rat_sql_graph' for graph info
             pooling_func (Callable): np.array(n_pieces, dim) ==> np.array(dim,); default is np.mean
         """
-        text_in = sample['question']
-        struct_in = self.sample_to_struct_input(sample, schemas_dict)
+        text_in = sample['question'].strip()
+        struct_in = self.sample_to_struct_input(sample)
 
         _splitter = "; structed knowledge: "
         txt = "{}{}{}".format(text_in, _splitter, struct_in)
@@ -316,7 +376,7 @@ class LinkPredictionDataCollector_USKG(LinkPredictionDataCollector):
         if pooling_func is None:
             def pooling_func(l): return np.mean(l, axis=0)
 
-        tokenized_txt = tokenizer([txt], **tokenizer_args)
+        tokenized_txt = self.tokenizer_fast([txt], **tokenizer_args)
 
         # YS: added
         sample['txt_pieces'] = {
@@ -329,14 +389,14 @@ class LinkPredictionDataCollector_USKG(LinkPredictionDataCollector):
 
         # Get encoding tensor
         with torch.no_grad():
-            if isinstance(model, prefixtuning.Model):
-                past_prompt = model.get_prompt(
+            if isinstance(self.model, prefixtuning.Model):
+                past_prompt = self.model.get_prompt(
                     bsz=1,              # bsz = input_ids.shape[0]
                     sample_size=1,      # sample_size=kwargs['num_beams']
                     description=None,
                     knowledge=None,
                 )
-                encoder_outputs = model.pretrain_model.encoder(
+                encoder_outputs = self.model.pretrain_model.encoder(
                     input_ids=torch.LongTensor(tokenized_txt.data['input_ids']),
                     attention_mask=torch.LongTensor(
                         tokenized_txt.data['attention_mask']),
@@ -344,20 +404,19 @@ class LinkPredictionDataCollector_USKG(LinkPredictionDataCollector):
                 )
             else:
                 # model: finetune.Model
-                encoder_outputs = model.pretrain_model.encoder(
+                encoder_outputs = self.model.pretrain_model.encoder(
                     input_ids=torch.LongTensor(tokenized_txt.data['input_ids']),
                     attention_mask=torch.LongTensor(
                         tokenized_txt.data['attention_mask']),
                 )
 
         encoder_output_hidden_states = encoder_outputs.last_hidden_state.detach().squeeze(0).cpu().numpy()
-        if debug:
+        if self.debug:
             print('encoder_output_hidden_states:',
                 encoder_output_hidden_states.shape)
 
         # Get node-pieces mapping via char ranges
-        char_ranges_dict = self.collect_node_char_ranges(
-            sample, txt=txt, tokenized_txt=tokenized_txt)
+        char_ranges_dict = self.collect_node_char_ranges(sample, txt=txt, tokenized_txt=tokenized_txt)
         node_char_ranges = char_ranges_dict['q_node_chars'] + \
             char_ranges_dict['c_node_chars'] + char_ranges_dict['t_node_chars']
 
@@ -386,7 +445,7 @@ class LinkPredictionDataCollector_USKG(LinkPredictionDataCollector):
 
             node_pieces_ranges.append((piece_st, piece_ed))
 
-        if debug:
+        if self.debug:
             print('node_pieces_ranges:', node_pieces_ranges)
 
         # Pool the encodings per node
@@ -399,22 +458,11 @@ class LinkPredictionDataCollector_USKG(LinkPredictionDataCollector):
         return node_encodings
 
 
-    def extract_probing_samples_link_prediction(self,
-                                                dataset_sample,
-                                                db_schemas_dict,
-                                                model,
-                                                tokenizer,
-                                                pos=None,
-                                                max_rel_occ=None,
-                                                debug=False):
+    def extract_probing_samples_link_prediction(self, dataset_sample, pos=None):
         """
         Args:
             dataset_sample (Dict): a sample dict from spider dataset
-            db_schemas_dict (Dict): db_id => db_schema, precomputed for all DBs
-            model: the uskg model (custom T5ForConditionalGeneration)
-            pos (List[Tuple]): the position pairs to use. If none, will randomly generate
-            max_rel_occ (int): each relation occur at most this many times in each (original) sample
-        
+            pos (List[Tuple]): the position pairs to use. If none, will randomly generate        
         Return:
             X (List[np.array]): input features, "shape" = (n, dim)
             y (List): output labels, "shape" = (n,)
@@ -434,24 +482,19 @@ class LinkPredictionDataCollector_USKG(LinkPredictionDataCollector):
         # get encodings
         # rat_sql_encoder_state = get_rat_sql_encoder_state(question=question, db_schema=db_schema, model=model)
         # enc_repr = rat_sql_encoder_state.memory.squeeze(0).detach().cpu().numpy()
-        enc_repr = self.get_node_encodings(
-            sample=d,
-            model=model,
-            tokenizer=tokenizer,
-            schemas_dict=db_schemas_dict,
-            debug=debug)
+        enc_repr = self.get_node_encodings(sample=d)
 
         X, y, pos = general_helpers.collect_link_prediction_samples(
             graph_dict,
             enc_repr,
             pos=pos,
-            max_rel_occ=max_rel_occ,
-            debug=debug)
+            max_rel_occ=self.max_rel_occ,
+            debug=self.debug)
 
         return X, y, pos
     
 
-    def collect_node_char_ranges(self, sample, tokenizer=None, tokenizer_args=None, txt=None, tokenized_txt=None, uskg_schemas_dict=None, debug=False):
+    def collect_node_char_ranges(self, sample, tokenizer_args=None, txt=None, tokenized_txt=None, uskg_schemas_dict=None):
         """
         Return the char ranges in the txt corresponding to each node. Help building the node-token mapping.
         """
@@ -464,7 +507,7 @@ class LinkPredictionDataCollector_USKG(LinkPredictionDataCollector):
             tokenized_txt = sample['txt_pieces']['tokenized_txt']
         else:
             # use input params or recompute
-            text_in = sample['question']
+            text_in = sample['question'].strip()
             struct_in = self.sample_to_struct_input(sample, uskg_schemas_dict)
             _splitter = "; structed knowledge: "
         
@@ -476,8 +519,8 @@ class LinkPredictionDataCollector_USKG(LinkPredictionDataCollector):
             
             if tokenized_txt is None:
                 # tokenized_txt = tokenizer([txt], max_length=1024, padding="max_length", truncation=True)
-                tokenized_txt = tokenizer([txt], **tokenizer_args)
-                ## possible problem: exceeding max length!
+                tokenized_txt = self.tokenizer_fast([txt], **tokenizer_args)
+                ## possible problem: exceeding max length! when happens, throw SDRASampleError
 
         _num_tokens = sum(tokenized_txt.data['attention_mask'][0])
         if _num_tokens > 1000:
@@ -514,7 +557,7 @@ class LinkPredictionDataCollector_USKG(LinkPredictionDataCollector):
         # Text part
         # Assumption: the mismatch between whitespace words (text_words) and question words only come from trailing puncts
         # Currently the code can handle combining question toks into whitespace words
-    #     text_words = text_in.strip().split(' ') + ['<SENTINAL>']
+        # text_words = text_in.strip().split(' ') + ['<SENTINAL>']
         text_words = text_in.lower().strip().split() + ['<SENTINAL>']
         text_word_char_ranges = [tokenized_txt.word_to_chars(i) for i in range(len(text_words) - 1)] + [(None, None)]  # -1 to remove the sentinal 
 
@@ -532,13 +575,17 @@ class LinkPredictionDataCollector_USKG(LinkPredictionDataCollector):
                 curr_char_ptr = curr_tw_char_range[0]
             else:
                 # not finishing current word 
-                assert curr_tw.startswith(orig_tok), (curr_tw, orig_tok)
+                if not curr_tw.startswith(orig_tok):
+                    print('- LinkPredictionDataCollector_USKG.collect_node_char_ranges():')
+                    print(f'* Warning: Word-token mismatch: {curr_tw}  {orig_tok}')
+                    print(f'* text_in: {text_in}')
+                    raise SDRASampleError('Word-token mismatch')
                 q_node_chars.append((curr_char_ptr, curr_char_ptr + len(orig_tok)))   # curr pos to curr pos + len 
                 curr_char_ptr += len(orig_tok)     # move ptr forward by len 
                 curr_tw = curr_tw[len(orig_tok):]  # get the remaining chars in the word 
 
         assert [txt[st:ed].lower() for st, ed in q_node_chars] == question_toks, ([txt[st:ed] for st, ed in q_node_chars], question_toks)
-        
+
         # Struct part 
         _str_before_struct = text_in + _splitter
         _n_words_before_struct = len(_str_before_struct.strip().split())
@@ -567,15 +614,20 @@ class LinkPredictionDataCollector_USKG(LinkPredictionDataCollector):
         t_node_chars.extend(struct_ranges_collector.table_char_ranges_list)
 
         ## Check all 
-        if debug:
+        if self.debug:
+            print('** LinkPredictionDataCollector_USKG::collect_node_char_ranges()')
+            print('* Q nodes')
             for q_node, (st, ed) in zip(q_nodes, q_node_chars):
-                print(q_node, txt[st:ed])
+                print(q_node, st, ed, txt[st:ed])
             print()
+            print('* T nodes')
             for t_node, (st, ed) in zip(t_nodes, t_node_chars):
-                print(t_node, txt[st:ed])
+                print(t_node, st, ed, txt[st:ed])
             print()
+            print('* C nodes')
             for c_node, (st, ed) in zip(c_nodes, c_node_chars):
-                print(c_node, txt[st:ed])
+                print(c_node, st, ed, txt[st:ed])
+            print()
             
         return {
             "q_node_chars": q_node_chars,
@@ -585,29 +637,7 @@ class LinkPredictionDataCollector_USKG(LinkPredictionDataCollector):
 
 
 
-class LinkPredictionDataCollector_USKG_spider(LinkPredictionDataCollector_USKG):
-    def precompute_schemas_dict(self, orig_tables_path, db_path):
-        """ 
-        Args:
-            orig_tables_path: path to spider tables.json
-            db_path: path to the spider DB dir
-        """
-        uskg_schemas_dict = dict()
-
-        spider_dbs_dict = spider_preprocessing.load_spider_tables(orig_tables_path)
-
-        for db_id, db_dict in spider_dbs_dict.items():
-            general_fmt_dict = general_helpers.db_dict_to_general_fmt(
-                db_dict, db_id,
-                sqlite_path=os.path.join(db_path, f"{db_id}/{db_id}.sqlite"),
-                rigorous_foreign_key=True)
-            
-            uskg_schema = self.general_fmt_dict_to_schema(general_fmt_dict)
-            
-            uskg_schemas_dict[db_id] = uskg_schema
-
-        return uskg_schemas_dict
-
+class LinkPredictionDataCollector_USKG_spider(LinkPredictionDataCollector_USKG, LinkPredictionDataCollector_spider):
     def serialize_schema(
             self,
             question: str,
@@ -688,10 +718,10 @@ class LinkPredictionDataCollector_USKG_spider(LinkPredictionDataCollector_USKG):
         return serialized_schema
 
 
-    def sample_to_struct_input(self, sample, schemas_dict):
+    def sample_to_struct_input(self, sample):
         """ Build the struct_in for a uskg_sample. """
         db_id = sample["db_id"]
-        uskg_schema = schemas_dict[db_id]
+        uskg_schema = self.db_schemas_dict[db_id]
         
         return self.serialize_schema(
             question=sample["question"],
@@ -712,38 +742,7 @@ class LinkPredictionDataCollector_USKG_spider(LinkPredictionDataCollector_USKG):
 def _wikisql_db_id_to_table_name(db_id):
     return '_'.join(['table'] + db_id.split('-'))
 
-class LinkPredictionDataCollector_USKG_wikisql(LinkPredictionDataCollector_USKG):
-    def precompute_schemas_dict(self, orig_tables_path, db_path):
-        """ 
-        Args:
-            orig_tables_path: path to wikisql xxx.tables.jsonl
-            db_path: path to the wikisql db file, xxx.db
-        """
-        uskg_schemas_dict = dict()
-
-        wikisql_dbs_dict = wikisql_preprocessing.load_wikisql_tables(orig_tables_path)
-
-        sqlite_conn = None
-        for db_id, db_dict in wikisql_dbs_dict.items():
-            if sqlite_conn is None:
-                # build a new sqlite_conn, keep it
-                general_fmt_dict = general_helpers.db_dict_to_general_fmt(db_dict, db_id,
-                                                        sqlite_path=db_path,
-                                                        rigorous_foreign_key=False)
-                sqlite_conn = general_fmt_dict['sqlite_conn']
-            else:
-                # reuse sqlite_conn
-                general_fmt_dict = general_helpers.db_dict_to_general_fmt(db_dict, db_id,
-                                                        sqlite_path=db_path,
-                                                        sqlite_conn=sqlite_conn,
-                                                        rigorous_foreign_key=False)
-            
-            uskg_schema = self.general_fmt_dict_to_schema(general_fmt_dict)
-            
-            uskg_schemas_dict[db_id] = uskg_schema
-
-        return uskg_schemas_dict
-
+class LinkPredictionDataCollector_USKG_wikisql(LinkPredictionDataCollector_USKG, LinkPredictionDataCollector_wikisql):
     def serialize_schema(
         self,
         question: str,
@@ -830,11 +829,11 @@ class LinkPredictionDataCollector_USKG_wikisql(LinkPredictionDataCollector_USKG)
             serialized_schema = table_sep.join(tables)
         return serialized_schema
 
-    def sample_to_struct_input(self, sample, schemas_dict):
+    def sample_to_struct_input(self, sample):
         """ Build the struct_in for a uskg_sample. """
         db_id = sample["table_id"]
-        uskg_schema = schemas_dict[db_id]
-
+        uskg_schema = self.db_schemas_dict[db_id]
+        
         return self.serialize_schema(
             question=sample["question"],
             db_path=uskg_schema["db_path"],

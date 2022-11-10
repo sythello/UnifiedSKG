@@ -174,9 +174,33 @@ def model_TEST():
     print('T5-base-random:', sql_pred_3)
 
 
+def data_identical_TEST():
+    ds1_path = '/home/yshao/Projects/SDR-analysis/data/probing/text2sql/link_prediction/spider/ratsql/dev.test.X.pkl'
+    ds2_path = '/home/yshao/Projects/SDR-analysis/data/probing/text2sql/link_prediction/spider/ratsql-tmp/dev.test.X.pkl'
+
+    with open(ds1_path, 'rb') as f:
+        ds1 = pickle.load(f)
+    with open(ds2_path, 'rb') as f:
+        ds2 = pickle.load(f)
+    
+    print(f'Load dataset size: {len(ds1)}, {len(ds2)}')
+
+    mismatch_list = []
+    for i, (x1, x2) in enumerate(zip(ds1, ds2)):
+        if not np.allclose(x1, x2):
+            mismatch_list.append(i)
+    
+    if not mismatch_list:
+        print('All match!')
+    else:
+        print(mismatch_list)
+        print(f'{len(mismatch_list)} mismatch')
+
+
 if __name__ == '__main__':
     # print(_random_select_indices_TEST())
-    model_TEST()
+    # model_TEST()
+    data_identical_TEST()
 
 
 
