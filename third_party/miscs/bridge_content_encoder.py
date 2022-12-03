@@ -12,6 +12,7 @@ from typing import List, Optional, Tuple
 from rapidfuzz import fuzz
 import sqlite3
 import functools
+import time
 
 # fmt: off
 _stopwords = {'who', 'ourselves', 'down', 'only', 'were', 'him', 'at', "weren't", 'has', 'few', "it's", 'm', 'again',
@@ -33,8 +34,35 @@ _stopwords = {'who', 'ourselves', 'down', 'only', 'were', 'him', 'at', "weren't"
 
 _commonwords = {"no", "yes", "many"}
 
+# Raising segfault
+# def is_number(s: str) -> bool:
+#     try:
+#         float(s.replace(",", ""))
+#         return True
+#     except:
+#         return False
 
+# Not working either
+# def is_number(s: str) -> bool:
+#     print(f'*** is_number(): {s}')  # working
+#     # print(f'*{s}')    # not working
+#     # print(s)          # not working 
+#     ret = True
+#     try:
+#         # s_repl = s.replace(",", "")
+#         # print(f'*** is_number() replaced: {s_repl}')
+#         # x = float(s_repl)
+#         x = float(s.replace(",", ""))
+#         # print(f'*** is_number() float: {x}')
+#     except:
+#         ret = False
+#     # print(f'*** is_number() return: {ret}')
+#     return ret
+
+# This one works?
 def is_number(s: str) -> bool:
+    if not s.isascii():
+        return False
     try:
         float(s.replace(",", ""))
         return True
@@ -128,15 +156,27 @@ def get_matched_entries(
         n_grams = split(s)
     else:
         n_grams = s
+    
+    # print('** n_grams:', n_grams)
+    # print('** field_values:', field_values)
+    # breakpoint()
 
     matched = dict()
     for field_value in field_values:
         if not isinstance(field_value, str):
             continue
         fv_tokens = split(field_value)
+        # print(f'** ({field_value}) fv_tokens:', fv_tokens)
         sm = difflib.SequenceMatcher(None, n_grams, fv_tokens)
         match = sm.find_longest_match(0, len(n_grams), 0, len(fv_tokens))
+        # print('** get_matched_entries:', field_value, match)
         if match.size > 0:
+            # this avoids segfault
+            # if match.size / len(fv_tokens) > m_theta:
+            #     match_str = field_value[match.b: match.b + match.size]
+            #     matched[match_str] = (field_value, field_value, 1.0, 1.0, match.size)
+            # continue
+
             source_match = get_effective_match_source(
                 n_grams, match.a, match.a + match.size
             )
@@ -148,11 +188,23 @@ def get_matched_entries(
                 c_match_str = match_str.lower().strip()
                 c_source_match_str = source_match_str.lower().strip()
                 c_field_value = field_value.lower().strip()
+
+                # this avoids segfault
+                # matched[match_str] = (
+                #     field_value,
+                #     source_match_str,
+                #     match.size / len(fv_tokens),
+                #     match.size / len(fv_tokens),
+                #     match.size,
+                # )
+                # continue
+
                 if (
                     c_match_str
-                    and not is_number(c_match_str)
+                    and not is_number(c_match_str)      # Problem is in this line
                     and not is_common_db_term(c_match_str)
                 ):
+                    ## CHECKED ok
                     if (
                         is_stopword(c_match_str)
                         or is_stopword(c_source_match_str)
@@ -174,6 +226,8 @@ def get_matched_entries(
                         or is_commonword(c_field_value)
                     ) and match_score < 1:
                         continue
+                    ## END CHECKED
+
                     s_match_score = match_score
                     if match_score >= m_theta and s_match_score >= s_theta:
                         if field_value.isupper() and match_score * s_match_score < 1:
@@ -199,9 +253,11 @@ def get_matched_entries(
 @functools.lru_cache(maxsize=1000, typed=False)
 def get_column_picklist(table_name: str, column_name: str, db_path: str) -> list:
     fetch_sql = "SELECT DISTINCT `{}` FROM `{}`".format(column_name, table_name)
+    # print('fetch_sql:', fetch_sql)
     try:
         conn = sqlite3.connect(db_path)
         conn.text_factory = bytes
+        # conn.text_factory = str
         c = conn.cursor()
         c.execute(fetch_sql)
         picklist = set()
@@ -215,9 +271,11 @@ def get_column_picklist(table_name: str, column_name: str, db_path: str) -> list
                     picklist.add(x[0].decode("latin-1"))
             else:
                 picklist.add(x[0])
+            # picklist.add("placeholder")
         picklist = list(picklist)
     finally:
         conn.close()
+    # print('picklist:', picklist)
     return picklist
 
 
@@ -229,9 +287,12 @@ def get_database_matches(
     top_k_matches: int = 2,
     match_threshold: float = 0.85,
 ) -> List[str]:
+    # breakpoint()
     picklist = get_column_picklist(
         table_name=table_name, column_name=column_name, db_path=db_path
     )
+    # breakpoint()   # this makes the segfault go away?!
+    # print(picklist)
     matches = []
     if picklist and isinstance(picklist[0], str):
         matched_entries = get_matched_entries(
@@ -240,6 +301,9 @@ def get_database_matches(
             m_theta=match_threshold,
             s_theta=match_threshold,
         )
+        # matched_entries = [(val, (val, val, 1.0, 1.0, 1)) for val in picklist if val in question]     # this won't give segfault 
+        # print('matched_entries:', matched_entries)
+        # breakpoint()
         if matched_entries:
             num_values_inserted = 0
             for _match_str, (
@@ -256,4 +320,5 @@ def get_database_matches(
                     num_values_inserted += 1
                     if num_values_inserted >= top_k_matches:
                         break
+    # breakpoint()
     return matches

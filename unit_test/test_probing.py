@@ -44,10 +44,11 @@ from third_party.miscs.bridge_content_encoder import get_database_matches
 
 from language.xsp.data_preprocessing import spider_preprocessing, wikisql_preprocessing, michigan_preprocessing
 
-from sdra.legacy import probing_data_utils as pb_utils
-
-from sdra.legacy.probing_data_collect import _random_select_indices, load_model_and_tokenizer
-from sdra.legacy.probing_data_utils import get_USKG_node_encodings, play_pred
+from sdr_analysis.helpers.general_helpers import _random_select_indices
+from sdra import probing_data_utils as pb_utils
+# from sdra.probing_data_collect import _random_select_indices, load_model_and_tokenizer
+from sdra.probing_data_utils import play_pred
+# from sdra.link_prediction_collectors import collect_link_prediction_samples
 
 
 def _random_select_indices_TEST():
@@ -77,6 +78,7 @@ def _random_select_indices_TEST():
 
 def tokenizer_TEST():
     ## Adapted from load_model_and_tokenizer()
+    ## the code is stale. TODO: make this runnable
     save_argv = sys.argv
 
     # Set args here for runnning on notebook, we make them out here to make it more illustrative.
@@ -143,6 +145,7 @@ def tokenizer_TEST():
 
 
 def model_TEST():
+    ## the code is stale. TODO: make this runnable
     struct_in = "| concert_singer | stadium : stadium_id , location , name , capacity , highest , lowest , average | singer : singer_id , name , country ( France ) , song_name , song_release_year , age , is_male | concert : concert_id , concert_name , theme , stadium_id , year | singer_in_concert : concert_id , singer_id"
     text_in = "what is the minimum, average, and maximum age of all singers from France?"
 
@@ -175,8 +178,8 @@ def model_TEST():
 
 
 def data_identical_TEST():
-    ds1_path = '/home/yshao/Projects/SDR-analysis/data/probing/text2sql/link_prediction/spider/ratsql/dev.test.X.pkl'
-    ds2_path = '/home/yshao/Projects/SDR-analysis/data/probing/text2sql/link_prediction/spider/ratsql-tmp/dev.test.X.pkl'
+    ds1_path = '/home/yshao/Projects/SDR-analysis/data/probing/text2sql/link_prediction/wikisql/uskg/dev.test.X.pkl'
+    ds2_path = '/home/yshao/Projects/SDR-analysis/data/probing/text2sql/link_prediction/wikisql/uskg-tmp/dev.test.X.pkl'
 
     with open(ds1_path, 'rb') as f:
         ds1 = pickle.load(f)
