@@ -56,10 +56,10 @@ class SingleNodeReconstructionDataCollector_USKG(SingleNodeReconstructionDataCol
         """
         Args:
             dataset_sample (Dict): a sample dict from spider dataset
-            pos (List[int|None]): the positions (node-ids) to use. If none, will randomly generate        
+            pos_list (List[int|None]): the positions (node-ids) to use. If none, will randomly generate
         Return:
             X (List[np.array]): input features, "shape" = (n, (toks, dim))
-            y (List[str]): output labels, "shape" = (n, words)
+            y (List[List[str]]): output labels, "shape" = (n, words)
             pos (List[int]): actual positions (node-id)
         """
 
@@ -94,10 +94,19 @@ class SingleNodeReconstructionDataCollector_USKG(SingleNodeReconstructionDataCol
                 pos=sample_pos,
                 max_node_type_occ=self.max_label_occ,
                 debug=self.debug)
-            
+
             all_X.extend(X)
             all_y.extend(y)
             all_pos.extend([(in_batch_idx, node_idx) for node_idx in pos])
+
+        # with open(output_path_test_X, 'wb') as f:
+        #     pickle.dump(all_X, f)
+        # with open(output_path_test_y, 'w') as f:
+        #     for y_toks in all_y:
+        #         f.write(' '.join(y_toks) + '\n')
+        # with open(output_path_test_pos, 'w') as f:
+        #     for ds_idx, node_idx in all_pos:
+        #         f.write(f'{ds_idx}\t{node_idx}\n')
 
         return all_X, all_y, all_pos
     

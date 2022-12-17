@@ -562,7 +562,6 @@ class BaseGraphDataCollector_USKG_spider(BaseGraphDataCollector_USKG, BaseGraphD
             serialized_schema = table_sep.join(tables)
         return serialized_schema
 
-
     def sample_to_struct_input(self, sample):
         """ Build the struct_in for a uskg_sample. """
         db_id = sample["db_id"]

@@ -23,6 +23,7 @@ import importlib
 import pickle
 import random
 import faulthandler
+import signal
 
 from seq2seq_construction import spider
 from third_party.spider.preprocess.get_tables import dump_db_json_schema
@@ -51,7 +52,6 @@ from sdra.link_prediction_collectors import LinkPredictionDataCollector_USKG_spi
 from sdra.single_node_reconstruction_collectors import SingleNodeReconstructionDataCollector_USKG_spider, SingleNodeReconstructionDataCollector_USKG_wikisql
 
 
-
 DATA_COLLECTOR_CLS_DICT = {
     "spider": {
         "link_prediction": LinkPredictionDataCollector_USKG_spider,
@@ -65,7 +65,8 @@ DATA_COLLECTOR_CLS_DICT = {
 
 
 def main(args):
-    # faulthandler.enable()   # try to spot the segfault; not so helpful...
+    faulthandler.enable()
+    faulthandler.register(signal.SIGUSR1.value)
 
     # if args.dataset == 'spider':
     #     probe_data_collector_cls = LinkPredictionDataCollector_USKG_spider
@@ -83,10 +84,10 @@ def main(args):
         max_label_occ=args.max_label_occ,
         ds_size=args.ds_size,
         enc_batch_size=args.enc_batch_size,
-        device_name='cuda:0',
+        device_name='cuda:0' if args.gpu else 'cpu',
     )
 
-    probe_data_collector.orig_ds_list = ['test']
+    # probe_data_collector.orig_ds_list = ['test']
     # probe_data_collector.prob_ds_list = ['test']
     # probe_data_collector._start_idx = 1100
     # probe_data_collector._end_idx = 100
@@ -129,6 +130,9 @@ if __name__ == '__main__':
         help="Only used when no 'pb_in_dir' given. Use X samples from original dataset to collect probing samples.")
     parser.add_argument('-max_label_occ', '--max_label_occ', type=int, required=False, default=None,
         help="Only used when no 'pb_in_dir' given. For each spider sample, include at most X probing samples per relation type.")
+
+    parser.add_argument('-gpu', '--gpu', action='store_true', default=False,
+        help="If set, use GPU.")
 
 
     args = parser.parse_args()
