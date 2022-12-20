@@ -52,55 +52,42 @@ from sdra.probing_data_collectors import BaseGraphDataCollector_USKG, BaseGraphD
 
 
 class LinkPredictionDataCollector_USKG(LinkPredictionDataCollector, BaseGraphDataCollector_USKG):
-    def extract_probing_samples_link_prediction(self, dataset_samples, pos_list=None):
+    def extract_probing_samples_link_prediction(self, dataset_sample, pos=None):
         """
         Args:
-            dataset_samples (List[Dict]): a batch of sample dict from spider dataset
-            pos_list (List[List[int]]): the positions (node-ids) to use. If none, will randomly generate
+            dataset_sample (Dict): a sample dict from spider dataset
+            pos (List[Tuple]): the position pairs to use. If none, will randomly generate        
         Return:
-            X (List[np.array]): input features, "shape" = (n, (dim,))
-            y (List[int]): output labels, "shape" = (n,)
-            pos (List[(int, int, int)]): actual positions (in_batch_idx, i, j)
+            X (List[np.array]): input features, "shape" = (n, dim)
+            y (List): output labels, "shape" = (n,)
+            pos (List[Tuple]): actual position (node-id) pairs for X and y
         """
 
         # TODO (later): add a batched version
 
-        all_enc_repr, valid_in_batch_ids = self.get_node_encodings(samples=dataset_samples, pooling_func=None)      # default pooling is avg
+        d = dataset_sample
 
-        all_X = []
-        all_y = []
-        all_pos = []
+        # db_id = d['db_id']
+        # db_schema = db_schemas_dict[db_id]
+        # question = d['question']
 
-        for in_batch_idx, enc_repr in zip(valid_in_batch_ids, all_enc_repr):
-            d = dataset_samples[in_batch_idx]
+        # get relation matrix (relation_id2name not available as it needs rat-sql model)
+        graph_dict = d['rat_sql_graph']
+        # graph_dict['relation_id2name'] = {v : k for k, v in model.encoder.encs_update.relation_ids.items()}
 
-            # get relation matrix (relation_id2name not available as it needs rat-sql model)
-            graph_dict = d['rat_sql_graph']
-            sample_pos = None if pos_list is None else pos_list[in_batch_idx]
+        # get encodings
+        # rat_sql_encoder_state = get_rat_sql_encoder_state(question=question, db_schema=db_schema, model=model)
+        # enc_repr = rat_sql_encoder_state.memory.squeeze(0).detach().cpu().numpy()
+        enc_repr = self.get_node_encodings([d])[0][0]      # return: all_enc_repr, valid_in_batch_ids
 
-            # If sample_pos is not given (None), will do sampling and return in out_pos;
-            # otherwise, out_pos is identical to sample_pos
-            X, y, out_pos = collect_link_prediction_samples(
-                graph_dict,
-                enc_repr,
-                pos=sample_pos,
-                max_rel_occ=self.max_label_occ,
-                debug=self.debug)
+        X, y, pos = collect_link_prediction_samples(
+            graph_dict,
+            enc_repr,
+            pos=pos,
+            max_rel_occ=self.max_label_occ,
+            debug=self.debug)
 
-            all_X.extend(X)
-            all_y.extend(y)
-            all_pos.extend([(in_batch_idx, i, j) for i, j in out_pos])
-
-        # with open(output_path_test_X, 'wb') as f:
-        #     pickle.dump(all_X, f)
-        # with open(output_path_test_y, 'w') as f:
-        #     for y_toks in all_y:
-        #         f.write(' '.join(y_toks) + '\n')
-        # with open(output_path_test_pos, 'w') as f:
-        #     for ds_idx, node_idx in all_pos:
-        #         f.write(f'{ds_idx}\t{node_idx}\n')
-
-        return all_X, all_y, all_pos
+        return X, y, pos
     
 
 class LinkPredictionDataCollector_USKG_spider(LinkPredictionDataCollector_USKG, BaseGraphDataCollector_USKG_spider):

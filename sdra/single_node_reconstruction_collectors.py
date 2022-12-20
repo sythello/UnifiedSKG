@@ -55,12 +55,12 @@ class SingleNodeReconstructionDataCollector_USKG(SingleNodeReconstructionDataCol
     def extract_probing_samples_single_node_reconstruction(self, dataset_samples, pos_list=None):
         """
         Args:
-            dataset_sample (Dict): a sample dict from spider dataset
-            pos_list (List[int|None]): the positions (node-ids) to use. If none, will randomly generate
+            dataset_samples (List[Dict]): a batch of sample dict from spider dataset
+            pos_list (List[List[int]]): the positions (node-ids) to use. If none, will randomly generate
         Return:
             X (List[np.array]): input features, "shape" = (n, (toks, dim))
             y (List[List[str]]): output labels, "shape" = (n, words)
-            pos (List[int]): actual positions (node-id)
+            pos (List[(int, int)]): actual positions (in_batch_idx, node_idx)
         """
 
         # db_id = d['db_id']
@@ -88,7 +88,9 @@ class SingleNodeReconstructionDataCollector_USKG(SingleNodeReconstructionDataCol
             # enc_repr = all_enc_repr[in_batch_idx]
             sample_pos = None if pos_list is None else pos_list[in_batch_idx]
 
-            X, y, pos = collect_single_node_reconstruction_samples(
+            # If sample_pos is not given (None), will do sampling and return in out_pos;
+            # otherwise, out_pos is identical to sample_pos
+            X, y, out_pos = collect_single_node_reconstruction_samples(
                 graph_dict,
                 enc_repr,
                 pos=sample_pos,
@@ -97,7 +99,7 @@ class SingleNodeReconstructionDataCollector_USKG(SingleNodeReconstructionDataCol
 
             all_X.extend(X)
             all_y.extend(y)
-            all_pos.extend([(in_batch_idx, node_idx) for node_idx in pos])
+            all_pos.extend([(in_batch_idx, node_idx) for node_idx in out_pos])
 
         # with open(output_path_test_X, 'wb') as f:
         #     pickle.dump(all_X, f)

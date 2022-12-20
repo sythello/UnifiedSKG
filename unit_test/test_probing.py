@@ -44,7 +44,7 @@ from third_party.miscs.bridge_content_encoder import get_database_matches
 
 from language.xsp.data_preprocessing import spider_preprocessing, wikisql_preprocessing, michigan_preprocessing
 
-from sdr_analysis.helpers.general_helpers import _random_select_indices
+from sdr_analysis.helpers.general_helpers import _random_select_indices, load_pickle_list
 from sdra import probing_data_utils as pb_utils
 # from sdra.probing_data_collect import _random_select_indices, load_model_and_tokenizer
 from sdra.probing_data_utils import play_pred
@@ -178,25 +178,29 @@ def model_TEST():
 
 
 def data_identical_TEST():
-    ds1_path = '/home/yshao/Projects/SDR-analysis/data/probing/text2sql/link_prediction/wikisql/uskg/dev.test.X.pkl'
-    ds2_path = '/home/yshao/Projects/SDR-analysis/data/probing/text2sql/link_prediction/wikisql/uskg-tmp/dev.test.X.pkl'
+    ds1_path = '/home/yshao/Projects/SDR-analysis/data/probing/text2sql/link_prediction/spider/uskg/dev.test.X.pkl'
+    ds2_path = '/home/yshao/Projects/SDR-analysis/data/probing/text2sql/link_prediction/spider/uskg-tmp/dev.test.X.pkl'
 
-    with open(ds1_path, 'rb') as f:
-        ds1 = pickle.load(f)
-    with open(ds2_path, 'rb') as f:
-        ds2 = pickle.load(f)
+    # with open(ds1_path, 'rb') as f:
+    #     ds1 = pickle.load(f)
+    # with open(ds2_path, 'rb') as f:
+    #     ds2 = pickle.load(f)
+    ds1 = load_pickle_list(ds1_path)
+    ds2 = load_pickle_list(ds2_path)
     
     print(f'Load dataset size: {len(ds1)}, {len(ds2)}')
 
     mismatch_list = []
     for i, (x1, x2) in enumerate(zip(ds1, ds2)):
-        if not np.allclose(x1, x2):
-            mismatch_list.append(i)
+        if not np.allclose(x1, x2, atol=0.001):
+            mismatch_list.append((i, x1.reshape(-1)[:3], x2.reshape(-1)[:3]))
     
     if not mismatch_list:
         print('All match!')
     else:
-        print(mismatch_list)
+        print(mismatch_list[:10])
+        if len(mismatch_list) > 10:
+            print('...')
         print(f'{len(mismatch_list)} mismatch')
 
 
