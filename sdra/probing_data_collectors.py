@@ -332,7 +332,6 @@ class BaseGraphDataCollector_USKG(BaseGraphDataCollector):
 
         return batch_node_encodings, valid_in_batch_ids
 
-
     def collect_node_char_ranges(self, sample, tokenizer_args=None, txt=None, tokenized_txt=None, uskg_schemas_dict=None):
         """
         Return the char ranges in the txt corresponding to each node. Help building the node-token mapping.
@@ -581,9 +580,9 @@ class BaseGraphDataCollector_USKG_spider(BaseGraphDataCollector_USKG, BaseGraphD
         )
     
 
-## Schema serialization for wikisql 
-def _wikisql_db_id_to_table_name(db_id):
-    return '_'.join(['table'] + db_id.split('-'))
+# ## Schema serialization for wikisql 
+# def _wikisql_db_id_to_table_name(db_id):
+#     return '_'.join(['table'] + db_id.split('-'))
 
 class BaseGraphDataCollector_USKG_wikisql(BaseGraphDataCollector_USKG, BaseGraphDataCollector_wikisql):
     def serialize_schema(

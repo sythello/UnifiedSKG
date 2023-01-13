@@ -87,10 +87,10 @@ def main(args):
         device_name='cuda:0' if args.gpu else 'cpu',
     )
 
-    probe_data_collector.orig_ds_list = ['dev']
-    probe_data_collector.prob_ds_list = ['test']
+    probe_data_collector.orig_ds_list = ['train_others']
+    # probe_data_collector.prob_ds_list = ['test']
     # probe_data_collector._start_idx = 12
-    probe_data_collector._end_idx = 30
+    # probe_data_collector._end_idx = 30
 
     probe_data_collector.load_model(args)
 
