@@ -44,7 +44,7 @@ from third_party.miscs.bridge_content_encoder import get_database_matches
 from language.xsp.data_preprocessing import spider_preprocessing, wikisql_preprocessing, michigan_preprocessing
 
 from sdr_analysis.helpers import general_helpers
-from sdr_analysis.helpers.general_helpers import SDRASampleError, _wikisql_db_id_to_table_name
+from sdr_analysis.helpers.general_helpers import SDRASampleError, _wikisql_db_id_to_table_name, POOLING_FUNC_DICT
 from sdr_analysis.helpers.base_graph_data_collector import BaseGraphDataCollector, BaseGraphDataCollector_spider, BaseGraphDataCollector_wikisql
 from sdr_analysis.helpers.link_prediction_collector import LinkPredictionDataCollector
 # from sdr_analysis.helpers.general_helpers import db_dict_to_general_fmt, collect_link_prediction_samples, LinkPredictionDataCollector
@@ -52,6 +52,10 @@ from sdra.probing_data_utils import RAT_SQL_RELATION_ID2NAME, StructCharRangesCo
 
 
 class BaseGraphDataCollector_USKG(BaseGraphDataCollector):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.extra_args['need_loading_schemas'] = True
+
     def load_model(self, main_args):
         save_argv = sys.argv
 
@@ -176,11 +180,16 @@ class BaseGraphDataCollector_USKG(BaseGraphDataCollector):
         
         return uskg_schema
 
-    def get_node_encodings(self, samples, tokenizer_args=None, pooling_func=None):
+    def get_node_encodings(self, samples):
         """
         Args:
             samples (List[Dict]): each sample must have 'question' for user input and 'rat_sql_graph' for graph info
             pooling_func (Callable): np.array(n_pieces, dim) ==> np.array(dim,); default is np.mean
+        Extra args from self.extra_args:
+            tokenizer_max_length (int) -> tokenizer(max_length=max_length)
+            tokenizer_padding (str) -> tokenizer(padding=padding)
+            tokenizer_truncation (bool) -> tokenizer(truncation=truncation)
+            pooling (str): None / 'avg' -> avg pooling; 'list' -> no pooling; 'max' -> max pooling; 'first' -> 1st pooling
         """
 
         if isinstance(samples, dict):
@@ -195,17 +204,23 @@ class BaseGraphDataCollector_USKG(BaseGraphDataCollector):
 
         bsz = len(samples)
 
-        if tokenizer_args is None:
-            tokenizer_args = {
-                "max_length": 1024,
-                "padding": "max_length",
-                "truncation": True
-            }
+        # if tokenizer_args is None:
+        #     tokenizer_args = {
+        #         "max_length": 1024,
+        #         "padding": "max_length",
+        #         "truncation": True
+        #     }
+        tokenizer_args = {
+            "max_length": self.extra_args.get("tokenizer_max_length", 1024),
+            "padding": self.extra_args.get("tokenizer_padding", "max_length"),
+            "truncation": self.extra_args.get("tokenizer_truncation", True)
+        }
 
-        if pooling_func is None:
-            def pooling_func(l): return np.mean(l, axis=0)
+        # if pooling_func is None:
+        #     def pooling_func(l): return np.mean(l, axis=0)
+        pooling = self.extra_args.get("pooling", "avg")
+        pooling_func = POOLING_FUNC_DICT[pooling]
 
-        # breakpoint()
 
         for sample in samples:
             text_in = sample['question'].strip()
@@ -224,8 +239,6 @@ class BaseGraphDataCollector_USKG(BaseGraphDataCollector):
                 'txt': txt,
                 'tokenized_txt': tokenized_txt,
             }
-        
-        # breakpoint()
 
         txt_list = [sample['txt_pieces']['txt'] for sample in samples]
         tokenized_txt_list = self.tokenizer_fast(txt_list, **tokenizer_args)
@@ -327,8 +340,6 @@ class BaseGraphDataCollector_USKG(BaseGraphDataCollector):
             
             batch_node_encodings.append(node_encodings)
             valid_in_batch_ids.append(in_batch_idx)
-
-        # breakpoint()
 
         return batch_node_encodings, valid_in_batch_ids
 

@@ -52,56 +52,14 @@ from sdra.probing_data_collectors import BaseGraphDataCollector_USKG, BaseGraphD
 
 
 class LinkPredictionDataCollector_USKG(LinkPredictionDataCollector, BaseGraphDataCollector_USKG):
-    def extract_probing_samples_link_prediction(self, dataset_samples, pos_list=None):
-        """
-        Args:
-            dataset_samples (List[Dict]): a batch of sample dict from spider dataset
-            pos_list (List[List[int]]): the positions (node-ids) to use. If none, will randomly generate
-        Return:
-            X (List[np.array]): input features, "shape" = (n, (dim,))
-            y (List[int]): output labels, "shape" = (n,)
-            pos (List[(int, int, int)]): actual positions (in_batch_idx, i, j)
-        """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.extra_args['pooling'] = 'avg'
 
-        # TODO (later): add a batched version
+    # Moved to LinkPredictionDataCollector
+    # def extract_probing_samples_link_prediction(self, dataset_samples, pos_list=None):
+    #     ...
 
-        all_enc_repr, valid_in_batch_ids = self.get_node_encodings(samples=dataset_samples, pooling_func=None)      # default pooling is avg
-
-        all_X = []
-        all_y = []
-        all_pos = []
-
-        for in_batch_idx, enc_repr in zip(valid_in_batch_ids, all_enc_repr):
-            d = dataset_samples[in_batch_idx]
-
-            # get relation matrix (relation_id2name not available as it needs rat-sql model)
-            graph_dict = d['rat_sql_graph']
-            sample_pos = None if pos_list is None else pos_list[in_batch_idx]
-
-            # If sample_pos is not given (None), will do sampling and return in out_pos;
-            # otherwise, out_pos is identical to sample_pos
-            X, y, out_pos = collect_link_prediction_samples(
-                graph_dict,
-                enc_repr,
-                pos=sample_pos,
-                max_rel_occ=self.max_label_occ,
-                debug=self.debug)
-
-            all_X.extend(X)
-            all_y.extend(y)
-            all_pos.extend([(in_batch_idx, i, j) for i, j in out_pos])
-
-        # with open(output_path_test_X, 'wb') as f:
-        #     pickle.dump(all_X, f)
-        # with open(output_path_test_y, 'w') as f:
-        #     for y_toks in all_y:
-        #         f.write(' '.join(y_toks) + '\n')
-        # with open(output_path_test_pos, 'w') as f:
-        #     for ds_idx, node_idx in all_pos:
-        #         f.write(f'{ds_idx}\t{node_idx}\n')
-
-        return all_X, all_y, all_pos
-    
 
 class LinkPredictionDataCollector_USKG_spider(LinkPredictionDataCollector_USKG, BaseGraphDataCollector_USKG_spider):
     pass
