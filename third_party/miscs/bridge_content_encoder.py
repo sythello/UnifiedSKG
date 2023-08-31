@@ -295,6 +295,7 @@ def get_database_matches(
     # print(picklist)
     matches = []
     if picklist and isinstance(picklist[0], str):
+        # breakpoint()
         matched_entries = get_matched_entries(
             s=question,
             field_values=picklist,

@@ -9,7 +9,8 @@ from datasets.dataset_dict import DatasetDict
 from torch.utils.data import Dataset
 from torch.utils.data.dataset import T_co
 
-from third_party.miscs.bridge_content_encoder import get_database_matches
+# from third_party.miscs.bridge_content_encoder import get_database_matches
+from uskg.third_party.miscs.bridge_content_encoder import get_database_matches
 
 from tqdm import tqdm
 
@@ -250,6 +251,8 @@ def serialize_schema(
                 column_name=column_name,
                 db_path=(db_path + "/" + db_id + "/" + db_id + ".sqlite"),
             )
+            # print('* question:', question)
+            # print('* matches:', matches)
             if matches:
                 return column_str_with_values.format(
                     column=column_name_str, values=value_sep.join(matches)
@@ -381,6 +384,7 @@ class DevDataset(Dataset):
             self.extended_data = []
             for raw_data in tqdm(self.raw_datasets):
                 extend_data = deepcopy(raw_data)
+                # print('raw_data question:', raw_data['question'])
                 extend_data.update(spider_add_serialized_schema(extend_data, args))
 
                 question, seq_out = spider_pre_process_one_function(extend_data, args=self.args)

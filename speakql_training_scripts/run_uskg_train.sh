@@ -1,7 +1,7 @@
 python train.py \
 --seed 2 \
 --cfg Salesforce/A-T5_base_prefix_spider_with_cell_value.cfg \
---run_name A-T5_base_prefix_spider_with_cell_value \
+--run_name A-tmp-T5_base_prefix_spider_with_cell_value \
 --logging_strategy steps \
 --logging_first_step true \
 --logging_steps 4 \
@@ -21,7 +21,7 @@ python train.py \
 --do_eval \
 --do_predict \
 --predict_with_generate \
---output_dir output/A-T5_base_prefix_spider_with_cell_value \
+--output_dir output/A-tmp-T5_base_prefix_spider_with_cell_value \
 --overwrite_output_dir \
 --per_device_train_batch_size 4 \
 --per_device_eval_batch_size 16 \
