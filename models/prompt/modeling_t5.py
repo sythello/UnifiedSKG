@@ -326,6 +326,10 @@ class T5Attention(nn.Module):
         self.pruned_heads = set()
         self.gradient_checkpointing = getattr(config, "gradient_checkpointing", False)
 
+        # (YS) allow manipulating the attention logits / weights
+        self.ext_attention_logits_fn = None
+        self.ext_attention_weights_fn = None
+
     def prune_heads(self, heads):
         if len(heads) == 0:
             return
@@ -470,7 +474,7 @@ class T5Attention(nn.Module):
         # get query states
         query_states = shape(self.q(hidden_states))  # (batch_size, n_heads, seq_length, dim_per_head)
 
-        # get key/value states
+        # get key/value states 
         key_states = project(
             hidden_states, self.k, key_value_states, past_key_value[0] if past_key_value is not None else None
         )
@@ -482,15 +486,17 @@ class T5Attention(nn.Module):
         present_key_value_state = (key_states, value_states) if (self.is_decoder and use_cache) else None  # TODO: Chen
 
         # Concatenate prefix to key-value states.  # TODO: Chen
+        # YS: key_states: (bs, n_heads, prev_len + seq_length, d_kv)
         if prefix is not None:
             key_states = torch.cat([prefix["prev_key"], key_states], dim=2)
             value_states = torch.cat([prefix["prev_value"], value_states], dim=2)  # TODO: Chen
 
         # compute scores
+        # (YS) scores: unnormalized attention, (bs, n_heads, real_seq_len, full_seq_len)
         scores = torch.matmul(
             query_states, key_states.transpose(3, 2)
         )  # equivalent of torch.einsum("bnqd,bnkd->bnqk", query_states, key_states), compatible with onnx op>9
-
+        # breakpoint()
         if position_bias is None:
             if not self.has_relative_attention_bias:
                 position_bias = torch.zeros(
@@ -499,6 +505,7 @@ class T5Attention(nn.Module):
                 if self.training and self.gradient_checkpointing:
                     position_bias.requires_grad = True
             else:
+                # (YS) position_bias: (bs, n_heads, real_seq_len, real_seq_len)
                 position_bias = self.compute_bias(real_seq_length, key_length)
 
             # if key and values are already calculated
@@ -508,6 +515,7 @@ class T5Attention(nn.Module):
 
             # Handle position_bias for prefix.  # TODO: Chen
             if prefix is not None:
+                # (YS) position_bias: (bs, n_heads, real_seq_len, full_seq_len)
                 position_bias = torch.cat([
                     torch.zeros((1, self.n_heads, int_seq_length, key_states.shape[2] - key_length)).to(position_bias.device),
                     position_bias
@@ -515,18 +523,31 @@ class T5Attention(nn.Module):
 
             if mask is not None:
                 # Handle attention masks for prefix.  # TODO: Chen
+                # (YS) mask: (bs, 1, 1, real_seq_len)
+                # (YS) prefix["prev_key_padding_mask"]: (bs, prev_len)
                 if prefix is not None:
                     assert key_states.shape[2] > mask.shape[3]  # TODO: Chen
                     assert prefix["prev_key_padding_mask"].shape[1] == key_states.shape[2] - key_length  # TODO: Chen
                     assert mask.shape[3] == key_length
+
+                    # (YS) mask: (bs, 1, 1, full_seq_len)
                     mask = torch.cat([
                         #torch.zeros((batch_size, 1, mask.shape[2], key_states.shape[2] - key_length)).to(mask.device),
                         prefix["prev_key_padding_mask"].float().unsqueeze(1).unsqueeze(2).expand(-1, -1, mask.shape[2], -1) * -10000.0,
                         mask
                     ], dim=3)  # TODO: Chen
+                # (YS) this is basically adding both mask and pos_bias to scores (attention logits)
                 position_bias = position_bias + mask  # (batch_size, n_heads, seq_length, key_length + prefix_length)  # TODO: Chen
 
         scores += position_bias
+        # (YS)
+        if self.ext_attention_logits_fn:
+            # torch.set_printoptions(precision=2, sci_mode=True)
+            # print('Call:', self.ext_attention_logits_fn)
+            # print('Before:', scores[:, 0])    # skipping the n_head dim
+            scores = self.ext_attention_logits_fn(scores)
+            # print('After:', scores[:, 0])
+
         attn_weights = nn.functional.softmax(scores.float(), dim=-1).type_as(
             scores
         )  # (batch_size, n_heads, seq_length, key_length)
@@ -537,6 +558,15 @@ class T5Attention(nn.Module):
         # Mask heads if we want to
         if layer_head_mask is not None:
             attn_weights = attn_weights * layer_head_mask
+
+        # (YS)
+        if self.ext_attention_weights_fn:
+            # print('Call:', self.ext_attention_weights_fn)
+            # print('Before:', attn_weights[:, 0].cpu().numpy().round(decimals=2))    # skipping the n_head dim
+            attn_weights = self.ext_attention_weights_fn(attn_weights)
+            # print('After:', attn_weights[:, 0].cpu().numpy().round(decimals=2))
+        # if self.ext_attention_logits_fn or self.ext_attention_weights_fn:
+        #     print('attn_weights:', attn_weights[:, 0])
 
         attn_output = unshape(torch.matmul(attn_weights, value_states))  # (batch_size, seq_length, dim)
         attn_output = self.o(attn_output)

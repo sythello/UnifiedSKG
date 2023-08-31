@@ -124,6 +124,7 @@ class Spider(datasets.GeneratorBasedBuilder):
                         db_path + "/" + db_id + "/" + db_id + ".sqlite", db_id
                     )
                 schema = self.schema_cache[db_id]
+                # breakpoint()
                 yield idx, {
                     "query": sample["query"],
                     "question": sample["question"],
