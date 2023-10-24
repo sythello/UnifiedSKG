@@ -155,7 +155,11 @@ from transformers.models.funnel.modeling_funnel import (
     FunnelForTokenClassification,
     FunnelModel,
 )
-from transformers.models.gpt2.modeling_gpt2 import GPT2ForSequenceClassification, GPT2LMHeadModel, GPT2Model
+
+# YS
+# from transformers.models.gpt2.modeling_gpt2 import GPT2ForSequenceClassification, GPT2LMHeadModel, GPT2Model
+from .modeling_gpt2 import GPT2ForSequenceClassification, GPT2LMHeadModel, GPT2Model
+
 from transformers.models.gpt_neo.modeling_gpt_neo import GPTNeoForCausalLM, GPTNeoForSequenceClassification, GPTNeoModel
 from transformers.models.hubert.modeling_hubert import HubertModel
 from transformers.models.ibert.modeling_ibert import (

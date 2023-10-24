@@ -270,6 +270,15 @@ class EvaluateFriendlySeq2SeqTrainer(transformers.trainer_seq2seq.Seq2SeqTrainer
                 model, inputs, prediction_loss_only=prediction_loss_only, ignore_keys=ignore_keys
             )
 
+        # YS: when prediction input is different from training input, should have "predict_input_ids" and "predict_attention_mask"
+        # and we use it to replace "input_ids" and "attention_mask" here
+        if "predict_input_ids" in inputs:
+            # YS TODO: need to make a copy...?
+            print('Predict step: replacing input with predict_input')
+            inputs = dict(inputs)
+            inputs["input_ids"] = inputs["predict_input_ids"]
+            inputs["attention_mask"] = inputs["predict_attention_mask"]
+
         has_labels = "labels" in inputs
         inputs = self._prepare_inputs(inputs)
 

@@ -5,7 +5,7 @@ import torch
 from torch import nn
 from transformers import AutoTokenizer
 from .base import PushToHubFriendlyModel
-from ..prompt.modeling_auto import AutoModelForSeq2SeqLM
+from ..prompt.modeling_auto import AutoModelForSeq2SeqLM, AutoModelForPreTraining
 
 
 class Model(PushToHubFriendlyModel):
@@ -22,12 +22,14 @@ class Model(PushToHubFriendlyModel):
 
         # Load tokenizer and model.
         self.tokenizer = AutoTokenizer.from_pretrained(args.bert.location, use_fast=False)
-        self.pretrain_model = AutoModelForSeq2SeqLM.from_pretrained(
-            args.bert.location
-        )
+        # YS: change the class to AutoModelForPretraining to include gpt2
+        # self.pretrain_model = AutoModelForSeq2SeqLM.from_pretrained(args.bert.location)
+        self.pretrain_model = AutoModelForPreTraining.from_pretrained(args.bert.location)
+
         self.config = self.pretrain_model.config
         from ..prompt.modeling_bart import BartForConditionalGeneration
         from ..prompt.modeling_t5 import T5ForConditionalGeneration
+        from ..prompt.modeling_gpt2 import GPT2LMHeadModel
         if isinstance(self.pretrain_model, BartForConditionalGeneration):
             self.match_n_layer = self.config.decoder_layers
             self.match_n_head = self.config.decoder_attention_heads
@@ -39,8 +41,16 @@ class Model(PushToHubFriendlyModel):
             self.match_n_head = self.config.num_heads
             self.n_embd = self.config.d_model
             self.match_n_embd = self.config.d_kv
+        elif isinstance(self.pretrain_model, GPT2LMHeadModel):
+            # YS added
+            self.match_n_layer = self.config.n_layer
+            self.match_n_head = self.config.n_head
+            self.n_embd = self.config.n_embd
+            self.match_n_embd = self.n_embd // self.match_n_head  
+            # Seems GPT2 just uses n_embd for q, k and v dim.
+            # ^ Not correct, still need to divide by n_head, like BART above
         else:
-            raise ValueError("Other models are not supported yet!")
+            raise ValueError(f"Other models are not supported yet! Got model class: {type(self.pretrain_model)}")
 
         if args.special_tokens:
             self.tokenizer.add_tokens([v for k, v in args.special_tokens])
