@@ -43,3 +43,8 @@ class WrappedSeq2SeqTrainingArguments(Seq2SeqTrainingArguments):
         default=None, metadata={
             "help": "The directory to load the model weights from."}
     )
+
+    # YS added
+    is_causal_lm: bool = field(
+        default=False, metadata={"help": "Whether the model is a causal LM (now only supporting GPT2), which needs post-processing prediction."}
+    )

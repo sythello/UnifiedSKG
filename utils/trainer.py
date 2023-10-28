@@ -272,15 +272,21 @@ class EvaluateFriendlySeq2SeqTrainer(transformers.trainer_seq2seq.Seq2SeqTrainer
 
         # YS: when prediction input is different from training input, should have "predict_input_ids" and "predict_attention_mask"
         # and we use it to replace "input_ids" and "attention_mask" here
-        if "predict_input_ids" in inputs:
-            # YS TODO: need to make a copy...?
-            print('Predict step: replacing input with predict_input')
-            inputs = dict(inputs)
-            inputs["input_ids"] = inputs["predict_input_ids"]
-            inputs["attention_mask"] = inputs["predict_attention_mask"]
+        # No longer use; directly use predict_XXX in generate()
+        # if "predict_input_ids" in inputs:
+        #     print('Predict step: create gen_input, replacing input with predict_input')
+        #     gen_inputs = dict(inputs)
+        #     gen_inputs["input_ids"] = gen_inputs["predict_input_ids"]
+        #     gen_inputs["attention_mask"] = gen_inputs["predict_attention_mask"]
+        # else:
+        #     gen_inputs = inputs
+        if "predict_input_ids" not in inputs:
+            inputs["predict_input_ids"] = inputs["input_ids"]
+            inputs["predict_attention_mask"] = inputs["attention_mask"]
 
         has_labels = "labels" in inputs
         inputs = self._prepare_inputs(inputs)
+        # gen_inputs = self._prepare_inputs(gen_inputs)       # YS added
 
         # XXX: adapt synced_gpus for fairscale as well
         gen_kwargs = {
@@ -301,14 +307,19 @@ class EvaluateFriendlySeq2SeqTrainer(transformers.trainer_seq2seq.Seq2SeqTrainer
         if "task_ids" in inputs:
             gen_kwargs["task_ids"] = inputs["task_ids"]
 
+        # breakpoint()
+
+        # YS: use predict_XXX here, to allow different input_ids and predict_input_ids
         generated_tokens = self.model.generate(
-            inputs["input_ids"],
-            attention_mask=inputs["attention_mask"],
+            inputs["predict_input_ids"],
+            attention_mask=inputs["predict_attention_mask"],
             **gen_kwargs,
         )
         # in case the batch is shorter than max length, the output should be padded
         if generated_tokens.shape[-1] < gen_kwargs["max_length"]:
             generated_tokens = self._pad_tensors_to_max_len(generated_tokens, gen_kwargs["max_length"])
+
+        # breakpoint()
 
         with torch.no_grad():
             if self.use_amp:
@@ -333,12 +344,24 @@ class EvaluateFriendlySeq2SeqTrainer(transformers.trainer_seq2seq.Seq2SeqTrainer
 
         return (loss, generated_tokens, labels)
 
+    # YS added
+    def _post_process_gpt2(self, pred, connector):
+            _gen = pred.split(connector)[1]
+            _gen = _gen.split(';')[0].strip()
+            return _gen
+
     def _post_process_function(
             self, examples: Dataset, predictions: np.ndarray, stage: str
     ) -> EvalPrediction:
         assert isinstance(examples, Dataset)
 
         predictions = self.tokenizer.batch_decode(predictions, skip_special_tokens=True)
+
+        # YS added: post_process gpt2 output
+        if self.args.is_causal_lm:
+            # TODO: passing the connector as parameter
+            _connector = '; SQL:'
+            predictions = [self._post_process_gpt2(pred, _connector) for pred in predictions]
 
         # Save locally.
         if self.args.local_rank <= 0:

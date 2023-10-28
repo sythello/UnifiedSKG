@@ -258,23 +258,28 @@ class GPT2Attention(nn.Module):
         
         # YS: Based on understanding from uskg, should concat prefix after saving present
         if prefix is not None:
+            # breakpoint()
+
             # prev_key: (bsz, n_head, pfx_len, attn_dim)
             # key: (bsz, n_head, seq_len, attn_dim)
             key = torch.cat([prefix["prev_key"], key], dim=2)
             value = torch.cat([prefix["prev_value"], value], dim=2)
 
-            # YS TODO: handle positional embedding (0 for prefix)?
-            # YS TODO: revise dealing with attention mask
+            # YS: handle positional embedding (0 for prefix)? Seems no need, hidden states (emb + pos) already projected
+            # YS: are we dealing with attention mask correct?
             # prefix["prev_key_padding_mask"]: (bsz, prefix_seqlen)
             # --> essentially zeros, with dtype, device and maybe knowledge description
             # attention_mask: (bsz, 1, 1, to_seq_len)
             # --> will be broadcasted to (bsz. n_heads, from_seq_len, to_seq_len)
             # After concat: (bsz, 1, 1, full_to_seq_len)
+            prefix_mask = prefix["prev_key_padding_mask"].float().unsqueeze(1).unsqueeze(2).expand(-1, -1, attention_mask.shape[2], -1) * -10000.0
+            # print('prefix_mask:', prefix_mask)
             attention_mask = torch.cat([
                 #torch.zeros((batch_size, 1, mask.shape[2], key_states.shape[2] - key_length)).to(mask.device),
-                prefix["prev_key_padding_mask"].float().unsqueeze(1).unsqueeze(2).expand(-1, -1, attention_mask.shape[2], -1) * -10000.0,
+                prefix_mask,
                 attention_mask
             ], dim=3)  # currently copied from uskg
+        # print('att_mask:', attention_mask[0, 0, 0, :20])
 
         attn_output, attn_weights = self._attn(query, key, value, attention_mask, head_mask)
 
@@ -719,8 +724,14 @@ class GPT2Model(GPT2PreTrainedModel):
         else:
             past_length = past_key_values[0][0].size(-2)
         if position_ids is None:
-            position_ids = torch.arange(past_length, input_shape[-1] + past_length, dtype=torch.long, device=device)
-            position_ids = position_ids.unsqueeze(0).view(-1, input_shape[-1])
+            # YS TODO: Not yet sure if using cumsum or arange should be the correct logic here
+            # Original, using arange
+            # position_ids = torch.arange(past_length, input_shape[-1] + past_length, dtype=torch.long, device=device)
+            # position_ids = position_ids.unsqueeze(0).view(-1, input_shape[-1])
+            # Using cumsum, copied from prepare_for_generation()
+            position_ids = attention_mask.long().cumsum(-1) - 1
+            position_ids.masked_fill_(attention_mask == 0, 1)
+            # breakpoint()
 
         # GPT2Attention mask.
         if attention_mask is not None:
@@ -922,6 +933,9 @@ class GPT2LMHeadModel(GPT2PreTrainedModel):
         self.lm_head = new_embeddings
 
     def prepare_inputs_for_generation(self, input_ids, past=None, **kwargs):
+        # YS NOTE: need to handle input fields for generation within this function
+        # Mainly, need to add "past_prompt", otherwise past_prompt is not used by the generate()
+
         token_type_ids = kwargs.get("token_type_ids", None)
         # only last token for inputs_ids if past is defined in kwargs
         if past:
@@ -933,9 +947,11 @@ class GPT2LMHeadModel(GPT2PreTrainedModel):
         position_ids = kwargs.get("position_ids", None)
 
         if attention_mask is not None and position_ids is None:
-            # create position_ids on the fly for batch generation
+            # Original: create position_ids on the fly for batch generation
             position_ids = attention_mask.long().cumsum(-1) - 1
             position_ids.masked_fill_(attention_mask == 0, 1)
+            # Copied from GPT2Model.forward: directly use arange
+            # position_ids = torch.arange(past_length, input_shape[-1] + past_length, dtype=torch.long, device=device)
             if past:
                 position_ids = position_ids[:, -1].unsqueeze(-1)
         else:
@@ -947,6 +963,7 @@ class GPT2LMHeadModel(GPT2PreTrainedModel):
             "position_ids": position_ids,
             "attention_mask": attention_mask,
             "token_type_ids": token_type_ids,
+            "past_prompt": kwargs['past_prompt'],  # YS added
         }
 
 
