@@ -1,5 +1,5 @@
 RUN_NAME=A-GPT2_small_prefix_spider_with_cell_value
-RUN_ID=tmp
+RUN_ID=20231027
 
 mkdir -p output/$RUN_NAME
 
@@ -22,6 +22,7 @@ python train.py \
 --num_train_epochs 400 \
 --adafactor true \
 --learning_rate 5e-5 \
+--do_train \
 --do_eval \
 --do_predict \
 --predict_with_generate \
@@ -36,7 +37,7 @@ python train.py \
 --is_causal_lm true
 
 
-# --do_train \
+
 
 
 # Can't use `tee output/$RUN_NAME/training-log.txt`: tee interferes with input()
