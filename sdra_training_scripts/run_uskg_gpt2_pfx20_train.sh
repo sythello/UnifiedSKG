@@ -1,11 +1,11 @@
-RUN_NAME=A-GPT2_small_prefix_spider_with_cell_value
-RUN_ID=20231027
+RUN_NAME=A-GPT2_small_prefix_spider_with_cell_value-pfx=20
+RUN_ID=20231102
 
 mkdir -p output/$RUN_NAME
 
 python train.py \
 --seed 2 \
---cfg Salesforce/A-GPT2_small_prefix_spider_with_cell_value.cfg \
+--cfg Salesforce/A-GPT2_small_prefix_spider_with_cell_value-pfx=20.cfg \
 --run_name $RUN_NAME \
 --logging_strategy steps \
 --logging_first_step true \
@@ -30,8 +30,8 @@ python train.py \
 --per_device_train_batch_size 4 \
 --per_device_eval_batch_size 16 \
 --generation_num_beams 1 \
---generation_max_length 500 \
---input_max_length 372 \
+--generation_max_length 490 \
+--input_max_length 362 \
 --ddp_find_unused_parameters true \
 --is_causal_lm true
 

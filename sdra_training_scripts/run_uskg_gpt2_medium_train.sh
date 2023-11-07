@@ -1,11 +1,11 @@
-RUN_NAME=A-GPT2_small_prefix_spider_with_cell_value
-RUN_ID=20231027
+RUN_NAME=A-GPT2_medium_prefix_spider_with_cell_value
+RUN_ID=20231101
 
 mkdir -p output/$RUN_NAME
 
 python train.py \
 --seed 2 \
---cfg Salesforce/A-GPT2_small_prefix_spider_with_cell_value.cfg \
+--cfg Salesforce/A-GPT2_medium_prefix_spider_with_cell_value.cfg \
 --run_name $RUN_NAME \
 --logging_strategy steps \
 --logging_first_step true \
@@ -16,9 +16,10 @@ python train.py \
 --save_strategy steps \
 --save_steps 500 \
 --save_total_limit 2 \
+--overwrite_output_dir \
 --load_best_model_at_end \
 --greater_is_better true \
---gradient_accumulation_steps 8 \
+--gradient_accumulation_steps 32 \
 --num_train_epochs 400 \
 --adafactor true \
 --learning_rate 5e-5 \
@@ -27,17 +28,19 @@ python train.py \
 --do_predict \
 --predict_with_generate \
 --output_dir output/$RUN_NAME/run-$RUN_ID \
---per_device_train_batch_size 4 \
---per_device_eval_batch_size 16 \
+--per_device_train_batch_size 1 \
+--per_device_eval_batch_size 4 \
 --generation_num_beams 1 \
---generation_max_length 500 \
---input_max_length 372 \
+--generation_max_length 1000 \
+--input_max_length 744 \
 --ddp_find_unused_parameters true \
 --is_causal_lm true
 
 
 ## Back-up Args
-# --overwrite_output_dir \
+# bs = 4: OOM
+# bs = 2: OOM
+# bs = 1:
 
 
 
