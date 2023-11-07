@@ -1,7 +1,8 @@
 
 [submodule "third_party/spider"]
 	path = third_party/spider
-	url = https://github.com/elementai/spider
+	# url = https://github.com/elementai/spider
+	url = https://github.com/sythello/spider
 [submodule "third_party/test_suite"]
 	path = third_party/test_suite
 	url = https://github.com/elementai/test-suite-sql-eval
