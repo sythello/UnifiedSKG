@@ -1,5 +1,5 @@
 RUN_NAME=A-GPT2_small_prefix_spider_with_cell_value-pfx=20
-RUN_ID=20231102
+RUN_ID=20231107
 
 mkdir -p output/$RUN_NAME
 
@@ -7,6 +7,7 @@ python train.py \
 --seed 2 \
 --cfg Salesforce/A-GPT2_small_prefix_spider_with_cell_value-pfx=20.cfg \
 --run_name $RUN_NAME \
+--overwrite_output_dir \
 --logging_strategy steps \
 --logging_first_step true \
 --logging_steps 4 \
@@ -37,7 +38,7 @@ python train.py \
 
 
 ## Back-up Args
-# --overwrite_output_dir \
+# 
 
 
 

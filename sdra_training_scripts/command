@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=2 script -c "sdra_training_scripts/run_uskg_gpt2_pfx20_train.sh" output/training-log-$(date +'%Y%m%d-%H%M').txt

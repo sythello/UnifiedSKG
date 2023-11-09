@@ -142,7 +142,12 @@ class TokenizedDataset(Dataset):
             )
 
             # Output
-            seq_out = ' ' + raw_item["seq_out"]     # prepend space to simulate concatenation
+            seq_out = ' ' + raw_item["seq_out"].strip()     # prepend space to simulate concatenation
+            # YS NOTE: this ending ';' attachment accidentally got removed; should still add!
+            if not seq_out.endswith(';'):
+                seq_out = seq_out + ';'         # Try to let the model learn to stop
+            seq_out = seq_out + ' END OF SQL'   # Try to strengthen the stop
+
             seq_out_len = self.training_args.generation_max_length - self.training_args.input_max_length
             # seq_out_len = self.training_args.generation_max_length
 
